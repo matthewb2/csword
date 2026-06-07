@@ -9,6 +9,8 @@ namespace AbiCsEngine
         public string Text { get; set; } = string.Empty;
         public TextRun StyleSource { get; set; }
         public RectangleF Bounds { get; set; } // 줄 내부에서의 로컬(혹은 글로벌) 좌표
+
+        public int SourceStartOffset;
     }
 
     // 물리적으로 줄바꿈(Line Break)이 완료된 한 줄

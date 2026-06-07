@@ -26,7 +26,7 @@ namespace AbiCsEngine
             doc.Paragraphs.Add(pTitle);
 
             // 레이아웃 엔진이 Line Break와 Page Break를 유발하는지 검증하기 위한 대량 문단 반복 루프
-            for (int i = 1; i <= 35; i++)
+            for (int i = 1; i <= 5; i++)
             {
                 Paragraph p = new Paragraph();
                 p.Runs.Add(new TextRun { Text = $"제 {i}조항 실시간 분석 루프: ", FontSize = 12, FontStyle = FontStyle.Bold, ForeColor = Color.Crimson });

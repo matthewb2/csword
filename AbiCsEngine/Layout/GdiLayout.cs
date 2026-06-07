@@ -24,6 +24,7 @@ namespace AbiCsEngine
 
             float currentLineHeight = 0;
             List<LayoutRun> currentLineBuffer = new List<LayoutRun>();
+            
 
             foreach (var para in doc.Paragraphs)
             {
@@ -60,26 +61,49 @@ namespace AbiCsEngine
 
                             if (fitCount > 0)
                             {
-                                string fitText = text.Substring(charIndex, fitCount);
-                                SizeF segmentSize = MeasureExactString(g, fitText, font);
+                                string fitText =
+                                    text.Substring(charIndex, fitCount);
 
-                                currentLineHeight = Math.Max(currentLineHeight, segmentSize.Height);
+                                SizeF segmentSize =
+                                    MeasureExactString(g, fitText, font);
+
+                                currentLineHeight =
+                                    Math.Max(currentLineHeight,
+                                             segmentSize.Height);
 
                                 currentLineBuffer.Add(new LayoutRun
                                 {
                                     Text = fitText,
+
                                     StyleSource = run,
-                                    Bounds = new RectangleF(localX, 0, segmentSize.Width, segmentSize.Height)
+
+                                    Bounds = new RectangleF(
+                                        localX,
+                                        0,
+                                        segmentSize.Width,
+                                        segmentSize.Height),
+
+                                    SourceStartOffset = charIndex
                                 });
 
                                 localX += segmentSize.Width;
                                 charIndex += fitCount;
 
-                                // 글자가 가로 제한에 도달하여 남은 텍스트가 있다면 Line Break
                                 if (charIndex < text.Length)
                                 {
-                                    FlushLine(ref currentPage, currentLineBuffer, ref localX, ref localY, ref currentLineHeight, printArea, ref currentPageNum, ref currentGlobalY, pages);
-                                    printArea = currentPage.PrintableArea;
+                                    FlushLine(
+                                        ref currentPage,
+                                        currentLineBuffer,
+                                        ref localX,
+                                        ref localY,
+                                        ref currentLineHeight,
+                                        printArea,
+                                        ref currentPageNum,
+                                        ref currentGlobalY,
+                                        pages);
+
+                                    printArea =
+                                        currentPage.PrintableArea;
                                 }
                             }
                         }

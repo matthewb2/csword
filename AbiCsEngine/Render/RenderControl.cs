@@ -16,6 +16,10 @@ namespace AbiCsEngine
         private bool _cursorVisible;
         private System.Windows.Forms.Timer _cursorBlinkTimer;
 
+        private TextRun? _caretRun;
+        private int _caretRunOffset;
+
+
         public Document? Document
         {
             get => _document;
@@ -41,6 +45,111 @@ namespace AbiCsEngine
             };
         }
 
+        protected override bool IsInputKey(Keys keyData)
+        {
+            switch (keyData)
+            {
+                case Keys.Left:
+                case Keys.Right:
+                case Keys.Up:
+                case Keys.Down:
+                case Keys.Home:
+                case Keys.End:
+                    return true;
+            }
+
+            return base.IsInputKey(keyData);
+        }
+
+        protected override void OnKeyPress(KeyPressEventArgs e)
+        {
+            base.OnKeyPress(e);
+
+            if (_cursorLine == null)
+                return;
+
+            if (char.IsControl(e.KeyChar))
+                return;
+
+            InsertCharacter(e.KeyChar);
+
+            e.Handled = true;
+        }
+
+        private bool TryFindRunAtCaret(
+    out LayoutRun layoutRun,
+    out int sourceOffset)
+        {
+            layoutRun = null!;
+            sourceOffset = 0;
+
+            if (_cursorLine == null)
+                return false;
+
+            int remaining = _cursorCharOffset;
+
+            foreach (var run in _cursorLine.LayoutRuns)
+            {
+                if (remaining <= run.Text.Length)
+                {
+                    layoutRun = run;
+
+                    sourceOffset =
+                        run.SourceStartOffset +
+                        remaining;
+
+                    return true;
+                }
+
+                remaining -= run.Text.Length;
+            }
+
+            return false;
+        }
+
+        private void InsertCharacter(char ch)
+        {
+            if (!TryFindRunAtCaret(
+                out LayoutRun layoutRun,
+                out int sourceOffset))
+                return;
+
+            var sourceRun = layoutRun.StyleSource;
+
+            sourceRun.Text =
+                sourceRun.Text.Insert(
+                    sourceOffset,
+                    ch.ToString());
+
+            _caretRun = sourceRun;
+            _caretRunOffset = sourceOffset + 1;
+
+            RefreshLayout();
+        }
+
+        private void DeleteBackward()
+        {
+            if (!TryFindRunAtCaret(
+                out LayoutRun layoutRun,
+                out int sourceOffset))
+                return;
+
+            if (sourceOffset <= 0)
+                return;
+
+            var sourceRun = layoutRun.StyleSource;
+
+            sourceRun.Text =
+                sourceRun.Text.Remove(
+                    sourceOffset - 1,
+                    1);
+
+            _caretRun = sourceRun;
+            _caretRunOffset = sourceOffset - 1;
+
+            RefreshLayout();
+        }
+
         public void RefreshLayout()
         {
             if (_document == null) return;
@@ -58,23 +167,68 @@ namespace AbiCsEngine
                     (int)lastPage.PageBounds.Bottom + 40);
             }
 
-            if (_cursorLine != null && !IsLineStillValid(_cursorLine))
-                _cursorLine = null;
-
-            if (_cursorLine == null && _pages.Count > 0 && _pages[0].Lines.Count > 0)
+            if (_caretRun != null)
+            {
+                RestoreCaret();
+            }
+            else if (_pages.Count > 0 && _pages[0].Lines.Count > 0)
             {
                 _cursorLine = _pages[0].Lines[0];
                 _cursorCharOffset = 0;
             }
 
+
             this.Invalidate();
         }
+
+        private void RestoreCaret()
+        {
+            if (_caretRun == null)
+                return;
+
+            foreach (var page in _pages)
+            {
+                foreach (var line in page.Lines)
+                {
+                    int globalOffset = 0;
+
+                    foreach (var run in line.LayoutRuns)
+                    {
+                        if (run.StyleSource == _caretRun)
+                        {
+                            int localOffset =
+                                _caretRunOffset -
+                                run.SourceStartOffset;
+
+                            if (localOffset >= 0 &&
+                                localOffset <= run.Text.Length)
+                            {
+                                _cursorLine = line;
+                                _cursorCharOffset =
+                                    globalOffset + localOffset;
+
+                                return;
+                            }
+                        }
+
+                        globalOffset += run.Text.Length;
+                    }
+                }
+            }
+        }
+
 
         private bool IsLineStillValid(LayoutLine line)
         {
             foreach (var page in _pages)
+            {
                 if (page.Lines.Contains(line))
                     return true;
+            }
+
+            System.Diagnostics.Debug.WriteLine(
+                "Cursor line invalidated");
+
             return false;
         }
 
@@ -108,6 +262,14 @@ namespace AbiCsEngine
             {
                 _cursorLine = result.line;
                 _cursorCharOffset = result.charOffset;
+                if (TryFindRunAtCaret(
+    out LayoutRun run,
+    out int sourceOffset))
+                {
+                    _caretRun = run.StyleSource;
+                    _caretRunOffset = sourceOffset;
+                }
+
                 _cursorVisible = true;
                 this.Invalidate();
             }
@@ -157,6 +319,10 @@ namespace AbiCsEngine
                     break;
                 case Keys.End:
                     _cursorCharOffset = GetLineCharCount(_cursorLine);
+                    e.Handled = true;
+                    break;
+                case Keys.Back:
+                    DeleteBackward();
                     e.Handled = true;
                     break;
                 default:
