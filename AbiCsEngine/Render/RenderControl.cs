@@ -90,14 +90,85 @@ namespace AbiCsEngine
 
         private void DeleteBackward()
         {
-            if (_caret == null) return;
+            if (_caret == null)
+                return;
+
             var caret = _caret.Value;
-            if (caret.Offset == 0) return;
-            caret.Run.Text = caret.Run.Text.Remove(caret.Offset - 1, 1);
+
+            if (caret.Offset > 0)
+            {
+                DeleteCharacter();
+            }
+            else
+            {
+                MergeParagraphBackward();
+            }
+        }
+
+        private void DeleteCharacter()
+        {
+            if (_caret == null)
+                return;
+
+            var caret = _caret.Value;
+
+            caret.Run.Text =
+                caret.Run.Text.Remove(
+                    caret.Offset - 1,
+                    1);
+
             caret.Offset--;
+
             _caret = caret;
+
             RefreshLayout();
         }
+
+        private void MergeParagraphBackward()
+        {
+            if (_caret == null || _document == null)
+                return;
+
+            var caret = _caret.Value;
+
+            Paragraph currentPara = caret.Paragraph;
+
+            int paraIndex =
+                _document.Paragraphs.IndexOf(
+                    currentPara);
+
+            if (paraIndex <= 0)
+                return;
+
+            Paragraph prevPara =
+                _document.Paragraphs[
+                    paraIndex - 1];
+
+            TextRun targetRun =
+                prevPara.Runs[
+                    prevPara.Runs.Count - 1];
+
+            int targetOffset =
+                targetRun.Text.Length;
+
+            foreach (var run in currentPara.Runs)
+            {
+                prevPara.Runs.Add(run);
+            }
+
+            _document.Paragraphs.Remove(
+                currentPara);
+
+            _caret = new DocPosition
+            {
+                Paragraph = prevPara,
+                Run = targetRun,
+                Offset = targetOffset
+            };
+
+            RefreshLayout();
+        }
+
 
         public void RefreshLayout()
         {
@@ -311,6 +382,10 @@ namespace AbiCsEngine
                     DeleteBackward();
                     e.Handled = true;
                     break;
+                case Keys.Delete:
+                    DeleteForward();
+                    e.Handled = true;
+                    break;
                 case Keys.Enter:
                     SplitParagraph();
                     e.Handled = true;
@@ -322,6 +397,72 @@ namespace AbiCsEngine
             _cursorVisible = true;
             this.Invalidate();
         }
+
+        private void DeleteForward()
+        {
+            if (_caret == null)
+                return;
+
+            var caret = _caret.Value;
+
+            if (caret.Offset < caret.Run.Text.Length)
+            {
+                DeleteCharacterForward();
+            }
+            else
+            {
+                MergeParagraphForward();
+            }
+        }
+
+        private void DeleteCharacterForward()
+        {
+            if (_caret == null)
+                return;
+
+            var caret = _caret.Value;
+
+            caret.Run.Text =
+                caret.Run.Text.Remove(
+                    caret.Offset,
+                    1);
+
+            RefreshLayout();
+        }
+
+        private void MergeParagraphForward()
+        {
+            if (_caret == null || _document == null)
+                return;
+
+            var caret = _caret.Value;
+
+            Paragraph currentPara =
+                caret.Paragraph;
+
+            int paraIndex =
+                _document.Paragraphs.IndexOf(
+                    currentPara);
+
+            if (paraIndex < 0 ||
+                paraIndex >= _document.Paragraphs.Count - 1)
+                return;
+
+            Paragraph nextPara =
+                _document.Paragraphs[
+                    paraIndex + 1];
+
+            foreach (var run in nextPara.Runs)
+            {
+                currentPara.Runs.Add(run);
+            }
+
+            _document.Paragraphs.Remove(
+                nextPara);
+
+            RefreshLayout();
+        }
+
 
         private void SplitParagraph()
         {
