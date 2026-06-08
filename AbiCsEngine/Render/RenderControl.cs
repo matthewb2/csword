@@ -63,6 +63,7 @@ namespace AbiCsEngine
                 case Keys.Down:
                 case Keys.Home:
                 case Keys.End:
+                case Keys.Enter:
                     return true;
             }
             return base.IsInputKey(keyData);
@@ -310,6 +311,10 @@ namespace AbiCsEngine
                     DeleteBackward();
                     e.Handled = true;
                     break;
+                case Keys.Enter:
+                    SplitParagraph();
+                    e.Handled = true;
+                    break;
                 default:
                     return;
             }
@@ -317,6 +322,82 @@ namespace AbiCsEngine
             _cursorVisible = true;
             this.Invalidate();
         }
+
+        private void SplitParagraph()
+        {
+            if (_caret == null || _document == null)
+                return;
+
+            var caret = _caret.Value;
+
+            Paragraph para = caret.Paragraph;
+            TextRun run = caret.Run;
+
+            Paragraph newPara =
+                new Paragraph();
+
+            int runIndex =
+                para.Runs.IndexOf(run);
+
+            string left =
+                run.Text.Substring(
+                    0,
+                    caret.Offset);
+
+            string right =
+                run.Text.Substring(
+                    caret.Offset);
+
+            run.Text = left;
+
+            TextRun newRun =
+                CloneRun(run);
+
+            newRun.Text = right;
+
+            newPara.Runs.Add(newRun);
+
+            for (int i = runIndex + 1;
+                 i < para.Runs.Count;
+                 i++)
+            {
+                newPara.Runs.Add(
+                    para.Runs[i]);
+            }
+
+            para.Runs.RemoveRange(
+                runIndex + 1,
+                para.Runs.Count - runIndex - 1);
+
+            int paraIndex =
+                _document.Paragraphs.IndexOf(para);
+
+            _document.Paragraphs.Insert(
+                paraIndex + 1,
+                newPara);
+
+            _caret = new DocPosition
+            {
+                Paragraph = newPara,
+                Run = newRun,
+                Offset = 0
+            };
+
+            RefreshLayout();
+        }
+
+        private TextRun CloneRun(TextRun run)
+        {
+            return new TextRun
+            {
+                FontName = run.FontName,
+                FontSize = run.FontSize,
+                FontStyle = run.FontStyle,
+                ForeColor = run.ForeColor,
+                Text = ""
+            };
+        }
+
 
         private DocPosition? GetPreviousDocumentPosition(DocPosition current)
         {
