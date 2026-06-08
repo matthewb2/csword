@@ -214,5 +214,7 @@ namespace AbiCsEngine
             }
             return TextRenderer.MeasureText(g, text, font, new Size(99999, 99999), TextFormatFlags.NoPadding);
         }
+
+
     }
 }
