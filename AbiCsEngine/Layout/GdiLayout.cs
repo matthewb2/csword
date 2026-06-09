@@ -199,7 +199,7 @@ namespace AbiCsEngine
 
             using (StringFormat sf = new StringFormat(StringFormat.GenericTypographic))
             {
-                sf.FormatFlags |= StringFormatFlags.NoClip;
+                sf.FormatFlags |= StringFormatFlags.NoClip | StringFormatFlags.MeasureTrailingSpaces;
                 CharacterRange[] ranges = { new CharacterRange(0, text.Length) };
                 sf.SetMeasurableCharacterRanges(ranges);
 
@@ -214,7 +214,5 @@ namespace AbiCsEngine
             }
             return TextRenderer.MeasureText(g, text, font, new Size(99999, 99999), TextFormatFlags.NoPadding);
         }
-
-
     }
 }
