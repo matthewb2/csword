@@ -186,6 +186,54 @@ namespace AbiCsEngine
             e.Handled = true;
         }
 
+        private bool TryFindRunFromDocPosition(
+    int docPosition,
+    out TextRun run,
+    out int offsetInRun)
+        {
+            run = null!;
+            offsetInRun = 0;
+
+            int currentPos = 0;
+
+            foreach (var para in _document!.Paragraphs)
+            {
+                foreach (var textRun in para.Runs)
+                {
+                    int len = textRun.Text.Length;
+
+                    if (docPosition <= currentPos + len)
+                    {
+                        run = textRun;
+                        offsetInRun =
+                            docPosition - currentPos;
+
+                        return true;
+                    }
+
+                    currentPos += len;
+                }
+            }
+
+            return false;
+        }
+
+
+        private void DumpDocPosition()
+        {
+            if (TryFindRunFromDocPosition(
+                _docPosition,
+                out var run,
+                out var offset))
+            {
+                Debug.WriteLine(
+                    $"DocPos={_docPosition} " +
+                    $"Run='{run.Text}' " +
+                    $"Offset={offset}");
+            }
+        }
+
+
         private bool TryFindRunAtCaret(
     out LayoutRun layoutRun,
     out int sourceOffset)
@@ -219,45 +267,52 @@ namespace AbiCsEngine
 
         private void InsertCharacter(char ch)
         {
-            if (!TryFindRunAtCaret(
-                out LayoutRun layoutRun,
-                out int sourceOffset))
+            if (!TryFindRunFromDocPosition(
+                _docPosition,
+                out TextRun run,
+                out int offset))
                 return;
 
-            var sourceRun = layoutRun.StyleSource;
-
-            sourceRun.Text =
-                sourceRun.Text.Insert(
-                    sourceOffset,
+            run.Text =
+                run.Text.Insert(
+                    offset,
                     ch.ToString());
 
-            _caretRun = sourceRun;
-            _caretRunOffset = sourceOffset + 1;
+            _docPosition++;
 
             RefreshLayout();
+
+            SyncCursorFromDocPosition();
+
+            DumpDocPosition();
         }
 
         private void DeleteBackward()
         {
-            if (!TryFindRunAtCaret(
-                out LayoutRun layoutRun,
-                out int sourceOffset))
+            if (_docPosition == 0)
                 return;
 
-            if (sourceOffset <= 0)
+            int deletePos =
+                _docPosition - 1;
+
+            if (!TryFindRunFromDocPosition(
+                deletePos,
+                out TextRun run,
+                out int offset))
                 return;
 
-            var sourceRun = layoutRun.StyleSource;
-
-            sourceRun.Text =
-                sourceRun.Text.Remove(
-                    sourceOffset - 1,
+            run.Text =
+                run.Text.Remove(
+                    offset,
                     1);
 
-            _caretRun = sourceRun;
-            _caretRunOffset = sourceOffset - 1;
+            _docPosition--;
 
             RefreshLayout();
+
+            SyncCursorFromDocPosition();
+
+            DumpDocPosition();
         }
 
         public void RefreshLayout()
