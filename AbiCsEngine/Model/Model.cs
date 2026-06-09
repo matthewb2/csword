@@ -21,4 +21,13 @@ namespace AbiCsEngine
     {
         public List<Paragraph> Paragraphs { get; set; } = new List<Paragraph>();
     }
+
+    public sealed class RunPosition
+    {
+        public TextRun Run = null!;
+        public int OffsetInRun;
+        public Paragraph Paragraph = null!;
+        public int RunIndex;
+    }
+
 }

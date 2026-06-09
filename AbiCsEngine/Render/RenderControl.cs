@@ -186,50 +186,109 @@ namespace AbiCsEngine
             e.Handled = true;
         }
 
-        private bool TryFindRunFromDocPosition(
+        private bool TryFindRunPosition(
     int docPosition,
-    out TextRun run,
-    out int offsetInRun)
+    out RunPosition pos)
         {
-            run = null!;
-            offsetInRun = 0;
+            pos = null!;
+
+            if (_document == null)
+                return false;
 
             int currentPos = 0;
 
-            foreach (var para in _document!.Paragraphs)
+            foreach (var paragraph in _document.Paragraphs)
             {
-                foreach (var textRun in para.Runs)
+                for (int runIndex = 0;
+                     runIndex < paragraph.Runs.Count;
+                     runIndex++)
                 {
-                    int len = textRun.Text.Length;
+                    var run = paragraph.Runs[runIndex];
+                    int runLength = run.Text.Length;
 
-                    if (docPosition <= currentPos + len)
+                    //
+                    // Run 내부
+                    //
+                    if (docPosition < currentPos + runLength)
                     {
-                        run = textRun;
-                        offsetInRun =
-                            docPosition - currentPos;
+                        pos = new RunPosition
+                        {
+                            Paragraph = paragraph,
+                            Run = run,
+                            RunIndex = runIndex,
+                            OffsetInRun = docPosition - currentPos
+                        };
 
                         return true;
                     }
 
-                    currentPos += len;
+                    //
+                    // Run 끝 위치
+                    //
+                    if (docPosition == currentPos + runLength)
+                    {
+                        //
+                        // 다음 Run 시작으로 귀속
+                        //
+                        if (runIndex + 1 < paragraph.Runs.Count)
+                        {
+                            pos = new RunPosition
+                            {
+                                Paragraph = paragraph,
+                                Run = paragraph.Runs[runIndex + 1],
+                                RunIndex = runIndex + 1,
+                                OffsetInRun = 0
+                            };
+
+                            return true;
+                        }
+
+                        //
+                        // 문단 마지막 Run 끝
+                        //
+                        pos = new RunPosition
+                        {
+                            Paragraph = paragraph,
+                            Run = run,
+                            RunIndex = runIndex,
+                            OffsetInRun = runLength
+                        };
+
+                        return true;
+                    }
+
+                    currentPos += runLength;
                 }
             }
 
             return false;
         }
 
+        private void DumpRunPosition(int docPosition)
+        {
+            if (TryFindRunPosition(docPosition, out var pos))
+            {
+                Debug.WriteLine(
+                    $"DocPos={docPosition} " +
+                    $"RunIndex={pos.RunIndex} " +
+                    $"OffsetInRun={pos.OffsetInRun} " +
+                    $"Text='{pos.Run.Text}'");
+            }
+        }
+
+
 
         private void DumpDocPosition()
         {
-            if (TryFindRunFromDocPosition(
+            if (TryFindRunPosition(
                 _docPosition,
-                out var run,
-                out var offset))
+                out var pos))
             {
                 Debug.WriteLine(
                     $"DocPos={_docPosition} " +
-                    $"Run='{run.Text}' " +
-                    $"Offset={offset}");
+                    $"RunIndex={pos.RunIndex} " +
+                    $"Offset={pos.OffsetInRun} " +
+                    $"Text='{pos.Run.Text}'");
             }
         }
 
@@ -267,16 +326,18 @@ namespace AbiCsEngine
 
         private void InsertCharacter(char ch)
         {
-            if (!TryFindRunFromDocPosition(
+            if (!TryFindRunPosition(
                 _docPosition,
-                out TextRun run,
-                out int offset))
+                out var pos))
                 return;
 
-            run.Text =
-                run.Text.Insert(
-                    offset,
+            pos.Run.Text =
+                pos.Run.Text.Insert(
+                    pos.OffsetInRun,
                     ch.ToString());
+
+            NormalizeParagraph(
+    pos.Paragraph);
 
             _docPosition++;
 
@@ -292,21 +353,23 @@ namespace AbiCsEngine
             if (_docPosition == 0)
                 return;
 
-            int deletePos =
-                _docPosition - 1;
+            int deletePos = _docPosition - 1;
 
-            if (!TryFindRunFromDocPosition(
+            if (!TryFindRunPosition(
                 deletePos,
-                out TextRun run,
-                out int offset))
+                out var pos))
                 return;
 
-            run.Text =
-                run.Text.Remove(
-                    offset,
+            pos.Run.Text =
+                pos.Run.Text.Remove(
+                    pos.OffsetInRun,
                     1);
 
             _docPosition--;
+
+            NormalizeParagraph(
+    pos.Paragraph);
+
 
             RefreshLayout();
 
@@ -314,6 +377,17 @@ namespace AbiCsEngine
 
             DumpDocPosition();
         }
+
+        private void RemoveEmptyRun(
+    TextRun run,
+    Paragraph paragraph)
+        {
+            if (run.Text.Length == 0)
+            {
+                paragraph.Runs.Remove(run);
+            }
+        }
+
 
         public void RefreshLayout()
         {
@@ -379,6 +453,60 @@ namespace AbiCsEngine
                 }
             }
         }
+
+        private void DeleteForward()
+        {
+            if (!TryFindRunPosition(
+                _docPosition,
+                out var pos))
+                return;
+
+            //
+            // Run 내부 삭제
+            //
+            if (pos.OffsetInRun < pos.Run.Text.Length)
+            {
+                pos.Run.Text =
+                    pos.Run.Text.Remove(
+                        pos.OffsetInRun,
+                        1);
+                NormalizeParagraph(
+    pos.Paragraph);
+            }
+            else
+            {
+                DeleteAcrossRunBoundary(pos);
+            }
+
+            RefreshLayout();
+
+            SyncCursorFromDocPosition();
+
+            DumpDocPosition();
+        }
+
+        private void DeleteAcrossRunBoundary(
+    RunPosition pos)
+        {
+            if (pos.RunIndex + 1 >=
+                pos.Paragraph.Runs.Count)
+                return;
+
+            var nextRun =
+                pos.Paragraph.Runs[
+                    pos.RunIndex + 1];
+
+            if (nextRun.Text.Length == 0)
+                return;
+
+            nextRun.Text =
+                nextRun.Text.Remove(0, 1);
+
+            RemoveEmptyRun(
+                nextRun,
+                pos.Paragraph);
+        }
+
 
         protected override void OnGotFocus(EventArgs e)
         {
@@ -472,6 +600,10 @@ namespace AbiCsEngine
                     DeleteBackward();
                     e.Handled = true;
                     break;
+                case Keys.Delete:
+                    DeleteForward();
+                    e.Handled = true;
+                    break;
                 default:
                     return;
             }
@@ -491,6 +623,27 @@ namespace AbiCsEngine
 
             ValidateDocPosition();
         }
+
+        private void DumpRuns(
+    Paragraph paragraph)
+        {
+            Debug.WriteLine(
+                "----- RUNS -----");
+
+            for (int i = 0;
+                 i < paragraph.Runs.Count;
+                 i++)
+            {
+                var run = paragraph.Runs[i];
+
+                Debug.WriteLine(
+                    $"[{i}] '{run.Text}' " +
+                    $"{run.FontName} " +
+                    $"{run.FontSize} " +
+                    $"{run.FontStyle}");
+            }
+        }
+
         private void MoveDocPositionLeft()
         {
             _docPosition--;
@@ -539,25 +692,6 @@ namespace AbiCsEngine
                 }
             }
             return null;
-        }
-
-        private void MoveVertical(int direction)
-        {
-            if (_cursorLine == null) return;
-            float targetX = GetCursorXInPage(_cursorLine, _cursorCharOffset);
-
-            var adj = GetAdjacentLine(direction);
-            if (adj != null)
-            {
-                _cursorLine = adj;
-                _cursorCharOffset = GetCharOffsetFromX(adj, targetX);
-            }
-            Debug.WriteLine(
-    $"UPDOWN DocPos={_docPosition}");
-            Debug.WriteLine(
-    $"VERT dir={direction} " +
-    $"current={_cursorLine?.GetHashCode()} " +
-    $"adj={adj?.GetHashCode()}");
         }
 
         private void MoveVerticalByDocPosition(
@@ -880,5 +1014,73 @@ namespace AbiCsEngine
                 _cursorBlinkTimer?.Dispose();
             base.Dispose(disposing);
         }
+
+        private bool IsSameStyle(
+    TextRun a,
+    TextRun b)
+        {
+            return
+                a.FontName == b.FontName &&
+                a.FontSize == b.FontSize &&
+                a.FontStyle == b.FontStyle &&
+                a.ForeColor == b.ForeColor;
+        }
+
+        private void MergeAdjacentRuns(
+    Paragraph paragraph)
+        {
+            int i = 0;
+
+            while (i < paragraph.Runs.Count - 1)
+            {
+                var current =
+                    paragraph.Runs[i];
+
+                var next =
+                    paragraph.Runs[i + 1];
+
+                if (IsSameStyle(
+                    current,
+                    next))
+                {
+                    current.Text += next.Text;
+
+                    paragraph.Runs.RemoveAt(
+                        i + 1);
+
+                    continue;
+                }
+
+                i++;
+            }
+        }
+
+        private void NormalizeParagraph(
+    Paragraph paragraph)
+        {
+            //
+            // 빈 Run 제거
+            //
+            for (int i = paragraph.Runs.Count - 1;
+                 i >= 0;
+                 i--)
+            {
+                if (paragraph.Runs[i].Text.Length == 0)
+                {
+                    paragraph.Runs.RemoveAt(i);
+                }
+            }
+
+            //
+            // 동일 스타일 병합
+            //
+            MergeAdjacentRuns(paragraph);
+
+            DumpRuns(paragraph);
+
+        }
+
+
+
     }
 }
