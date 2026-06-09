@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Drawing;
 using System.Windows.Forms;
+using System.Diagnostics;
 
 namespace AbiCsEngine
 {
@@ -18,6 +19,98 @@ namespace AbiCsEngine
 
         private TextRun? _caretRun;
         private int _caretRunOffset;
+
+        private int _docPosition;
+
+
+        private int GetDocPosition(
+    LayoutLine targetLine,
+    int targetOffset)
+        {
+            int docPos = 0;
+
+            foreach (var page in _pages)
+            {
+                foreach (var line in page.Lines)
+                {
+                    if (line == targetLine)
+                    {
+                        return docPos + targetOffset;
+                    }
+
+                    docPos += GetLineCharCount(line);
+                }
+            }
+
+            return docPos;
+        }
+
+        private int GetDocPosition()
+        {
+            if (_cursorLine == null)
+                return 0;
+
+            int docPos = 0;
+
+            foreach (var page in _pages)
+            {
+                foreach (var line in page.Lines)
+                {
+                    if (line == _cursorLine)
+                    {
+                        return docPos + _cursorCharOffset;
+                    }
+
+                    foreach (var run in line.LayoutRuns)
+                    {
+                        docPos += run.Text.Length;
+                    }
+                }
+            }
+
+            return docPos;
+        }
+
+        private void DumpRunInfo(
+    LayoutLine line,
+    int charOffset)
+        {
+            int remaining = charOffset;
+
+            Debug.WriteLine(
+                $"LINE OFFSET={charOffset}");
+
+            foreach (var run in line.LayoutRuns)
+            {
+                Debug.WriteLine(
+                    $"RUN '{run.Text}' LEN={run.Text.Length}");
+
+                if (remaining <= run.Text.Length)
+                {
+                    Debug.WriteLine(
+                        $"--> CARET IN RUN '{run.Text}' LOCAL={remaining}");
+
+                    return;
+                }
+
+                remaining -= run.Text.Length;
+            }
+        }
+
+
+        private void SyncCursorFromDocPosition()
+        {
+            if (TryGetCaretFromDocPosition(
+                _docPosition,
+                out LayoutLine line,
+                out int offset))
+            {
+                _cursorLine = line;
+                _cursorCharOffset = offset;
+            }
+            Debug.WriteLine(
+    $"SYNC Line={line.GetHashCode()} Offset={offset}");
+        }
 
 
         public Document? Document
@@ -64,10 +157,10 @@ namespace AbiCsEngine
             switch (key)
             {
                 case Keys.Left:
-                    MoveCursorLeft();
+                    MoveDocPositionLeft();
                     return true;
                 case Keys.Right:
-                    MoveCursorRight();
+                    MoveDocPositionRight();
                     return true;
                 case Keys.Up:
                 case Keys.Down:
@@ -232,17 +325,6 @@ namespace AbiCsEngine
             }
         }
 
-        private bool IsLineStillValid(LayoutLine line)
-        {
-            foreach (var page in _pages)
-            {
-                if (page.Lines.Contains(line))
-                    return true;
-            }
-
-            return false;
-        }
-
         protected override void OnGotFocus(EventArgs e)
         {
             base.OnGotFocus(e);
@@ -282,6 +364,15 @@ namespace AbiCsEngine
                 }
 
                 _cursorVisible = true;
+
+                Debug.WriteLine(
+    $"MOUSE Offset={_cursorCharOffset}");
+
+                _docPosition = GetDocPosition();
+
+                Debug.WriteLine(
+                    $"MOUSE DocPos={_docPosition}");
+
                 this.Invalidate();
             }
         }
@@ -303,11 +394,11 @@ namespace AbiCsEngine
             switch (e.KeyCode)
             {
                 case Keys.Up:
-                    MoveVertical(-1);
+                    MoveVerticalByDocPosition(-1);
                     e.Handled = true;
                     break;
                 case Keys.Down:
-                    MoveVertical(1);
+                    MoveVerticalByDocPosition(1);
                     e.Handled = true;
                     break;
                 case Keys.Home:
@@ -316,6 +407,10 @@ namespace AbiCsEngine
                     break;
                 case Keys.End:
                     _cursorCharOffset = GetLineCharCount(_cursorLine);
+                    e.Handled = true;
+                    break;
+                case Keys.F5:
+                    MoveDocPositionRight();
                     e.Handled = true;
                     break;
                 case Keys.Back:
@@ -330,50 +425,27 @@ namespace AbiCsEngine
             this.Invalidate();
         }
 
-        private void MoveCursorLeft()
+        private void MoveDocPositionRight()
         {
-            if (_cursorLine == null)
-            {
-                if (_pages.Count > 0 && _pages[0].Lines.Count > 0)
-                {
-                    _cursorLine = _pages[0].Lines[0];
-                    _cursorCharOffset = 0;
-                    _cursorVisible = true;
-                    this.Invalidate();
-                }
-                return;
-            }
+            _docPosition++;
 
-            if (_cursorCharOffset > 0)
-                _cursorCharOffset--;
-            else
-                MoveToPreviousLine();
+            SyncCursorFromDocPosition();
 
-            _cursorVisible = true;
-            this.Invalidate();
+            Debug.WriteLine("===== BEFORE =====");
+            DumpRunInfo(_cursorLine!, _cursorCharOffset);
+
+            ValidateDocPosition();
         }
-
-        private void MoveCursorRight()
+        private void MoveDocPositionLeft()
         {
-            if (_cursorLine == null)
-            {
-                if (_pages.Count > 0 && _pages[0].Lines.Count > 0)
-                {
-                    _cursorLine = _pages[0].Lines[0];
-                    _cursorCharOffset = 0;
-                    _cursorVisible = true;
-                    this.Invalidate();
-                }
-                return;
-            }
+            _docPosition--;
 
-            if (_cursorCharOffset < GetLineCharCount(_cursorLine))
-                _cursorCharOffset++;
-            else
-                MoveToNextLine();
+            SyncCursorFromDocPosition();
 
-            _cursorVisible = true;
-            this.Invalidate();
+            Debug.WriteLine("===== BEFORE =====");
+            DumpRunInfo(_cursorLine!, _cursorCharOffset);
+
+            ValidateDocPosition();
         }
 
         private int GetLineCharCount(LayoutLine line)
@@ -384,25 +456,6 @@ namespace AbiCsEngine
             return count;
         }
 
-        private void MoveToPreviousLine()
-        {
-            var prev = GetAdjacentLine(-1);
-            if (prev != null)
-            {
-                _cursorLine = prev;
-                _cursorCharOffset = GetLineCharCount(prev);
-            }
-        }
-
-        private void MoveToNextLine()
-        {
-            var next = GetAdjacentLine(1);
-            if (next != null)
-            {
-                _cursorLine = next;
-                _cursorCharOffset = 0;
-            }
-        }
 
         private LayoutLine? GetAdjacentLine(int direction)
         {
@@ -444,7 +497,49 @@ namespace AbiCsEngine
                 _cursorLine = adj;
                 _cursorCharOffset = GetCharOffsetFromX(adj, targetX);
             }
+            Debug.WriteLine(
+    $"UPDOWN DocPos={_docPosition}");
+            Debug.WriteLine(
+    $"VERT dir={direction} " +
+    $"current={_cursorLine?.GetHashCode()} " +
+    $"adj={adj?.GetHashCode()}");
         }
+
+        private void MoveVerticalByDocPosition(
+    int direction)
+        {
+            if (_cursorLine == null)
+                return;
+
+            float targetX =
+                GetCursorXInPage(
+                    _cursorLine,
+                    _cursorCharOffset);
+
+            var adj =
+                GetAdjacentLine(direction);
+
+            if (adj == null)
+                return;
+
+            int targetOffset =
+                GetCharOffsetFromX(
+                    adj,
+                    targetX);
+
+            _docPosition =
+                GetDocPosition(
+                    adj,
+                    targetOffset);
+
+            SyncCursorFromDocPosition();
+
+            ValidateDocPosition();
+
+            _cursorVisible = true;
+            Invalidate();
+        }
+
 
         private float GetCursorXInPage(LayoutLine line, int charOffset)
         {
@@ -559,6 +654,63 @@ namespace AbiCsEngine
             return globalOffset;
         }
 
+        private bool TryGetCaretFromDocPosition(
+    int docPosition,
+    out LayoutLine line,
+    out int charOffset)
+        {
+            line = null!;
+            charOffset = 0;
+
+            int currentPos = 0;
+
+            foreach (var page in _pages)
+            {
+                foreach (var layoutLine in page.Lines)
+                {
+                    int lineLength = GetLineCharCount(layoutLine);
+
+                    if (docPosition <= currentPos + lineLength)
+                    {
+                        line = layoutLine;
+                        charOffset = docPosition - currentPos;
+                        return true;
+                    }
+
+                    currentPos += lineLength;
+                }
+            }
+
+            return false;
+        }
+
+        private void ValidateDocPosition()
+        {
+            int docPos = GetDocPosition();
+
+            if (!TryGetCaretFromDocPosition(
+                docPos,
+                out LayoutLine line,
+                out int offset))
+            {
+                Debug.WriteLine(
+                    $"VALIDATE FAIL DocPos={docPos}");
+                return;
+            }
+
+            bool same =
+                line == _cursorLine &&
+                offset == _cursorCharOffset;
+
+            Debug.WriteLine(
+                $"DocPos={docPos} " +
+                $"Orig={_cursorCharOffset} " +
+                $"Restored={offset} " +
+                $"Result={(same ? "OK" : "FAIL")}");
+        }
+
+
+
         private int GetCharOffsetInRun(Graphics g, LayoutRun run, float localX, StringFormat sf, RectangleF rect)
         {
             string text = run.Text;
@@ -640,6 +792,10 @@ namespace AbiCsEngine
                     page.Lines.Contains(_cursorLine))
                 {
                     float cx = GetCursorXInPage(_cursorLine, _cursorCharOffset) + renderOffsetX;
+
+                    Debug.WriteLine(
+    $"PAINT Offset={_cursorCharOffset} X={cx}");
+
                     float cy = _cursorLine.Bounds.Y;
                     float ch = _cursorLine.Bounds.Height;
                     using (Pen pen = new Pen(Color.Black, 1.5f))
