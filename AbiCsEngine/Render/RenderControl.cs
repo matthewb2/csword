@@ -23,7 +23,7 @@ namespace AbiCsEngine
         private int _docPosition;
 
 
-        private int GetDocPosition(
+        private int GetDocPositionFromCaret(
     LayoutLine targetLine,
     int targetOffset)
         {
@@ -39,32 +39,6 @@ namespace AbiCsEngine
                     }
 
                     docPos += GetLineCharCount(line);
-                }
-            }
-
-            return docPos;
-        }
-
-        private int GetDocPosition()
-        {
-            if (_cursorLine == null)
-                return 0;
-
-            int docPos = 0;
-
-            foreach (var page in _pages)
-            {
-                foreach (var line in page.Lines)
-                {
-                    if (line == _cursorLine)
-                    {
-                        return docPos + _cursorCharOffset;
-                    }
-
-                    foreach (var run in line.LayoutRuns)
-                    {
-                        docPos += run.Text.Length;
-                    }
                 }
             }
 
@@ -551,7 +525,10 @@ namespace AbiCsEngine
                 Debug.WriteLine(
     $"MOUSE Offset={_cursorCharOffset}");
 
-                _docPosition = GetDocPosition();
+                _docPosition =
+     GetDocPositionFromCaret(
+         _cursorLine!,
+         _cursorCharOffset);
 
                 Debug.WriteLine(
                     $"MOUSE DocPos={_docPosition}");
@@ -717,7 +694,7 @@ namespace AbiCsEngine
                     targetX);
 
             _docPosition =
-                GetDocPosition(
+                GetDocPositionFromCaret(
                     adj,
                     targetOffset);
 
@@ -875,7 +852,9 @@ namespace AbiCsEngine
 
         private void ValidateDocPosition()
         {
-            int docPos = GetDocPosition();
+            int docPos = GetDocPositionFromCaret(
+        _cursorLine!,
+        _cursorCharOffset);
 
             if (!TryGetCaretFromDocPosition(
                 docPos,

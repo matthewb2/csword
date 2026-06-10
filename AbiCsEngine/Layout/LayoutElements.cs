@@ -7,7 +7,7 @@ namespace AbiCsEngine
     public class LayoutRun
     {
         public string Text { get; set; } = string.Empty;
-        public TextRun StyleSource { get; set; }
+        public required TextRun StyleSource { get; set; }
         public RectangleF Bounds { get; set; } // 줄 내부에서의 로컬(혹은 글로벌) 좌표
 
         public int SourceStartOffset;
