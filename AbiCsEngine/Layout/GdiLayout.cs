@@ -117,8 +117,7 @@ namespace AbiCsEngine
                     printArea = currentPage.PrintableArea;
                 }
 
-                // 문단 간의 간격을 반영 (Y축 누적)
-                localY += 15f;
+                // (문단 간격 없음 — FlushLine의 5f 줄간격만 사용)
             }
 
             return pages;

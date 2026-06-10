@@ -74,7 +74,7 @@ namespace AbiCsEngine
 
         private void SyncCursorFromDocPosition()
         {
-            if (TryGetCaretFromDocPosition(
+            if (ValidateCaretFromDocPosition(
                 _docPosition,
                 out LayoutLine line,
                 out int offset))
@@ -758,9 +758,8 @@ namespace AbiCsEngine
                     {
                         float lineTop = line.Bounds.Y;
                         float lineBottom = lineTop + line.Bounds.Height;
-                        float hitMargin = Math.Max(line.Bounds.Height * 0.5f, 8f);
 
-                        if (canvasPt.Y >= lineTop - hitMargin && canvasPt.Y <= lineBottom + hitMargin)
+                        if (canvasPt.Y >= lineTop && canvasPt.Y <= lineBottom)
                         {
                             int charOffset = GetCharOffsetFromX(line, clickX);
                             return (line, charOffset);
@@ -820,7 +819,7 @@ namespace AbiCsEngine
             return globalOffset;
         }
 
-        private bool TryGetCaretFromDocPosition(
+        private bool ValidateCaretFromDocPosition(
     int docPosition,
     out LayoutLine line,
     out int charOffset)
@@ -856,7 +855,7 @@ namespace AbiCsEngine
         _cursorLine!,
         _cursorCharOffset);
 
-            if (!TryGetCaretFromDocPosition(
+            if (!ValidateCaretFromDocPosition(
                 docPos,
                 out LayoutLine line,
                 out int offset))
