@@ -8,6 +8,17 @@ namespace AbiCsEngine
 {
     public class RenderControl : UserControl
     {
+
+        private struct CaretInfo
+        {
+            public LayoutLine Line;
+            public int OffsetInLine;
+
+            public float X;
+            public float Y;
+            public float Height;
+        }
+
         private Document? _document;
         private List<LayoutPage> _pages = new List<LayoutPage>();
         private GdiLayout _engine = new GdiLayout();
@@ -22,6 +33,51 @@ namespace AbiCsEngine
 
         private int _docPosition;
 
+
+        private bool TryGetCaretInfo(
+    int docPosition,
+    out CaretInfo caret)
+        {
+            caret = default;
+
+            int currentPos = 0;
+
+            foreach (var page in _pages)
+            {
+                foreach (var line in page.Lines)
+                {
+                    int lineLength =
+                        GetLineCharCount(line);
+
+                    if (docPosition <= currentPos + lineLength)
+                    {
+                        int offsetInLine =
+                            docPosition - currentPos;
+
+                        float x =
+                            GetCursorXInPage(
+                                line,
+                                offsetInLine);
+
+                        caret = new CaretInfo
+                        {
+                            Line = line,
+                            OffsetInLine = offsetInLine,
+
+                            X = x,
+                            Y = line.Bounds.Y,
+                            Height = line.Bounds.Height
+                        };
+
+                        return true;
+                    }
+
+                    currentPos += lineLength;
+                }
+            }
+
+            return false;
+        }
 
         private int GetDocPositionFromCaret(
     LayoutLine targetLine,
@@ -74,16 +130,14 @@ namespace AbiCsEngine
 
         private void SyncCursorFromDocPosition()
         {
-            if (ValidateCaretFromDocPosition(
-                _docPosition,
-                out LayoutLine line,
-                out int offset))
+            if (TryGetCaretInfo(
+    _docPosition,
+    out var caret))
             {
-                _cursorLine = line;
-                _cursorCharOffset = offset;
+                Debug.WriteLine(
+                    $"DocPos={_docPosition} " +
+                    $"Offset={caret.OffsetInLine}");
             }
-            Debug.WriteLine(
-    $"SYNC Line={line.GetHashCode()} Offset={offset}");
         }
 
 
@@ -641,71 +695,83 @@ namespace AbiCsEngine
             return count;
         }
 
-
-        private LayoutLine? GetAdjacentLine(int direction)
+        private LayoutLine? GetAdjacentLine(
+    LayoutLine currentLine,
+    int direction)
         {
             for (int pi = 0; pi < _pages.Count; pi++)
             {
                 var page = _pages[pi];
+
                 for (int li = 0; li < page.Lines.Count; li++)
                 {
-                    if (page.Lines[li] == _cursorLine)
-                    {
-                        int targetLi = li + direction;
-                        if (targetLi >= 0 && targetLi < page.Lines.Count)
-                            return page.Lines[targetLi];
+                    if (page.Lines[li] != currentLine)
+                        continue;
 
-                        int targetPi = pi + direction;
-                        if (targetPi >= 0 && targetPi < _pages.Count)
-                        {
-                            var targetPage = _pages[targetPi];
-                            if (targetPage.Lines.Count > 0)
-                                return direction < 0
-                                    ? targetPage.Lines[targetPage.Lines.Count - 1]
-                                    : targetPage.Lines[0];
-                        }
-                        return null;
+                    int targetLi = li + direction;
+
+                    if (targetLi >= 0 &&
+                        targetLi < page.Lines.Count)
+                    {
+                        return page.Lines[targetLi];
                     }
+
+                    int targetPi = pi + direction;
+
+                    if (targetPi >= 0 &&
+                        targetPi < _pages.Count)
+                    {
+                        var targetPage =
+                            _pages[targetPi];
+
+                        if (targetPage.Lines.Count > 0)
+                        {
+                            return direction < 0
+                                ? targetPage.Lines[
+                                    targetPage.Lines.Count - 1]
+                                : targetPage.Lines[0];
+                        }
+                    }
+
+                    return null;
                 }
             }
+
             return null;
         }
 
         private void MoveVerticalByDocPosition(
     int direction)
         {
-            if (_cursorLine == null)
+            if (!TryGetCaretInfo(
+                _docPosition,
+                out var caret))
+            {
                 return;
+            }
 
-            float targetX =
-                GetCursorXInPage(
-                    _cursorLine,
-                    _cursorCharOffset);
+            LayoutLine? targetLine =
+                GetAdjacentLine(
+                    caret.Line,
+                    direction);
 
-            var adj =
-                GetAdjacentLine(direction);
-
-            if (adj == null)
+            if (targetLine == null)
                 return;
 
             int targetOffset =
                 GetCharOffsetFromX(
-                    adj,
-                    targetX);
+                    targetLine,
+                    caret.X);
 
             _docPosition =
                 GetDocPositionFromCaret(
-                    adj,
+                    targetLine,
                     targetOffset);
 
-            SyncCursorFromDocPosition();
-
-            ValidateDocPosition();
-
             _cursorVisible = true;
+
             Invalidate();
         }
-
 
         private float GetCursorXInPage(LayoutLine line, int charOffset)
         {
@@ -855,25 +921,15 @@ namespace AbiCsEngine
         _cursorLine!,
         _cursorCharOffset);
 
-            if (!ValidateCaretFromDocPosition(
-                docPos,
-                out LayoutLine line,
-                out int offset))
+            if (TryGetCaretInfo(
+    _docPosition,
+    out var caret))
             {
                 Debug.WriteLine(
-                    $"VALIDATE FAIL DocPos={docPos}");
-                return;
+                    $"DocPos={_docPosition} " +
+                    $"Offset={caret.OffsetInLine}");
             }
 
-            bool same =
-                line == _cursorLine &&
-                offset == _cursorCharOffset;
-
-            Debug.WriteLine(
-                $"DocPos={docPos} " +
-                $"Orig={_cursorCharOffset} " +
-                $"Restored={offset} " +
-                $"Result={(same ? "OK" : "FAIL")}");
         }
 
 
@@ -935,10 +991,8 @@ namespace AbiCsEngine
                     renderOffsetX, page.PageBounds.Y,
                     page.PageBounds.Width, page.PageBounds.Height);
 
-                //g.FillRectangle(Brushes.Black, paperRect.X + 5, paperRect.Y + 5, paperRect.Width, paperRect.Height);
                 g.FillRectangle(Brushes.White, paperRect);
-                //g.DrawRectangle(Pens.DimGray, paperRect.X, paperRect.Y, paperRect.Width, paperRect.Height);
-
+                
                 foreach (var line in page.Lines)
                 {
                     foreach (var run in line.LayoutRuns)
@@ -958,15 +1012,25 @@ namespace AbiCsEngine
                 if (_cursorLine != null && _cursorVisible && this.Focused &&
                     page.Lines.Contains(_cursorLine))
                 {
-                    float cx = GetCursorXInPage(_cursorLine, _cursorCharOffset) + renderOffsetX;
+                    if (TryGetCaretInfo(
+    _docPosition,
+    out var caret))
+                    {
+                        float cx =
+                            caret.X + renderOffsetX;
 
-                    Debug.WriteLine(
-    $"PAINT Offset={_cursorCharOffset} X={cx}");
+                        using (Pen pen =
+                            new Pen(Color.Black, 1.5f))
+                        {
+                            g.DrawLine(
+                                pen,
+                                cx,
+                                caret.Y,
+                                cx,
+                                caret.Y + caret.Height);
+                        }
+                    }
 
-                    float cy = _cursorLine.Bounds.Y;
-                    float ch = _cursorLine.Bounds.Height;
-                    using (Pen pen = new Pen(Color.Black, 1.5f))
-                        g.DrawLine(pen, cx, cy, cx, cy + ch);
                 }
 
                 string footerText = $"Page {page.PageNumber}";
