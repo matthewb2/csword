@@ -10,11 +10,29 @@ namespace AbiCsEngine
         public float FontSize { get; set; } = 11f;
         public FontStyle FontStyle { get; set; } = FontStyle.Regular;
         public Color ForeColor { get; set; } = Color.Black;
+        public virtual int Length => Text.Length;
+    }
+
+    public class EopRun : TextRun
+    {
+        public override int Length => 1;
     }
 
     public class Paragraph
     {
         public List<TextRun> Runs { get; set; } = new List<TextRun>();
+
+        public int Length
+        {
+            get
+            {
+                int len = 0;
+                foreach (var run in Runs)
+                    len += run.Length;
+                len += 1; // EOP
+                return len;
+            }
+        }
     }
 
     public class Document

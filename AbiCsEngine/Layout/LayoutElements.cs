@@ -19,6 +19,8 @@ namespace AbiCsEngine
         public List<LayoutRun> LayoutRuns { get; set; } = new List<LayoutRun>();
         public RectangleF Bounds { get; set; } // 줄의 전체 바운딩 박스
         public float Height => Bounds.Height;
+        public int StartDocPosition { get; set; }
+        public int EndDocPosition { get; set; }
     }
 
     // 물리적으로 페이지 분할(Page Break)이 완료된 한 페이지 (A4 규격)

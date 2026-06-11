@@ -24,12 +24,39 @@ namespace AbiCsEngine
 
             float currentLineHeight = 0;
             List<LayoutRun> currentLineBuffer = new List<LayoutRun>();
-            
+            int docPos = 0;
+            int lineStartDocPos = 0;
 
             foreach (var para in doc.Paragraphs)
             {
+                bool hasEopRun = false;
+
                 foreach (var run in para.Runs)
                 {
+                    if (run is EopRun)
+                    {
+                        hasEopRun = true;
+                        docPos++;
+                        if (currentLineBuffer.Count > 0)
+                        {
+                            FlushLine(ref currentPage, currentLineBuffer,
+                                ref localX, ref localY, ref currentLineHeight,
+                                printArea, ref currentPageNum, ref currentGlobalY,
+                                pages, lineStartDocPos, docPos);
+                            printArea = currentPage.PrintableArea;
+                        }
+                        else
+                        {
+                            FlushLine(ref currentPage, currentLineBuffer,
+                                ref localX, ref localY, ref currentLineHeight,
+                                printArea, ref currentPageNum, ref currentGlobalY,
+                                pages, lineStartDocPos, docPos);
+                            printArea = currentPage.PrintableArea;
+                        }
+                        lineStartDocPos = docPos;
+                        continue;
+                    }
+
                     if (string.IsNullOrEmpty(run.Text)) continue;
 
                     using (Font font = new Font(run.FontName, run.FontSize, run.FontStyle))
@@ -41,114 +68,108 @@ namespace AbiCsEngine
                         {
                             float remainingWidth = printArea.Right - localX;
 
-                            // 현재 남은 공간에 들어갈 수 있는 글자 수 측정
                             int fitCount = MeasureFitCharacters(g, text.Substring(charIndex), font, remainingWidth);
 
                             if (fitCount == 0)
                             {
-                                // 가로 영역이 꽉 찬 경우 줄바꿈(Line Break) 실행
                                 if (currentLineBuffer.Count > 0)
                                 {
-                                    // 중요: currentPage 자체를 ref로 넘겨 새 페이지 교체 시 반영되도록 함
-                                    FlushLine(ref currentPage, currentLineBuffer, ref localX, ref localY, ref currentLineHeight, printArea, ref currentPageNum, ref currentGlobalY, pages);
+                                    FlushLine(ref currentPage, currentLineBuffer,
+                                        ref localX, ref localY, ref currentLineHeight,
+                                        printArea, ref currentPageNum, ref currentGlobalY,
+                                        pages, lineStartDocPos, docPos);
                                     printArea = currentPage.PrintableArea;
+                                    lineStartDocPos = docPos;
                                 }
                                 else
                                 {
-                                    fitCount = 1; // 글자 하나가 줄 너비보다 큰 예외 처리
+                                    fitCount = 1;
                                 }
                             }
 
                             if (fitCount > 0)
                             {
-                                string fitText =
-                                    text.Substring(charIndex, fitCount);
+                                string fitText = text.Substring(charIndex, fitCount);
 
-                                SizeF segmentSize =
-                                    MeasureExactString(g, fitText, font);
+                                SizeF segmentSize = MeasureExactString(g, fitText, font);
 
-                                currentLineHeight =
-                                    Math.Max(currentLineHeight,
-                                             segmentSize.Height);
+                                currentLineHeight = Math.Max(currentLineHeight, segmentSize.Height);
 
                                 currentLineBuffer.Add(new LayoutRun
                                 {
                                     Text = fitText,
-
                                     StyleSource = run,
-
-                                    Bounds = new RectangleF(
-                                        localX,
-                                        0,
-                                        segmentSize.Width,
-                                        segmentSize.Height),
-
+                                    Bounds = new RectangleF(localX, 0, segmentSize.Width, segmentSize.Height),
                                     SourceStartOffset = charIndex
                                 });
 
+                                docPos += fitCount;
                                 localX += segmentSize.Width;
                                 charIndex += fitCount;
 
                                 if (charIndex < text.Length)
                                 {
-                                    FlushLine(
-                                        ref currentPage,
-                                        currentLineBuffer,
-                                        ref localX,
-                                        ref localY,
-                                        ref currentLineHeight,
-                                        printArea,
-                                        ref currentPageNum,
-                                        ref currentGlobalY,
-                                        pages);
-
-                                    printArea =
-                                        currentPage.PrintableArea;
+                                    FlushLine(ref currentPage, currentLineBuffer,
+                                        ref localX, ref localY, ref currentLineHeight,
+                                        printArea, ref currentPageNum, ref currentGlobalY,
+                                        pages, lineStartDocPos, docPos);
+                                    printArea = currentPage.PrintableArea;
+                                    lineStartDocPos = docPos;
                                 }
                             }
                         }
                     }
                 }
 
-                // 하나의 문단(Paragraph)이 끝날 때마다 버퍼 비우기 및 문단 여백 확보
-                if (currentLineBuffer.Count > 0)
+                if (!hasEopRun)
                 {
-                    FlushLine(ref currentPage, currentLineBuffer, ref localX, ref localY, ref currentLineHeight, printArea, ref currentPageNum, ref currentGlobalY, pages);
-                    printArea = currentPage.PrintableArea;
+                    docPos++;
+                    if (currentLineBuffer.Count > 0)
+                    {
+                        FlushLine(ref currentPage, currentLineBuffer,
+                            ref localX, ref localY, ref currentLineHeight,
+                            printArea, ref currentPageNum, ref currentGlobalY,
+                            pages, lineStartDocPos, docPos);
+                        printArea = currentPage.PrintableArea;
+                        lineStartDocPos = docPos;
+                    }
+                    else
+                    {
+                        FlushLine(ref currentPage, currentLineBuffer,
+                            ref localX, ref localY, ref currentLineHeight,
+                            printArea, ref currentPageNum, ref currentGlobalY,
+                            pages, lineStartDocPos, docPos);
+                        printArea = currentPage.PrintableArea;
+                        lineStartDocPos = docPos;
+                    }
                 }
-
-                // (문단 간격 없음 — FlushLine의 5f 줄간격만 사용)
             }
 
             return pages;
         }
 
-        // 라인 버퍼의 내용을 물리 캔버스 좌표로 확정 짓는 핵심 동기화 파이프라인
         private void FlushLine(ref LayoutPage currentPage, List<LayoutRun> buffer,
             ref float localX, ref float localY, ref float lineH, RectangleF printArea,
-            ref int pageNum, ref float globalY, List<LayoutPage> pages)
+            ref int pageNum, ref float globalY, List<LayoutPage> pages,
+            int lineStartDocPos, int lineEndDocPos)
         {
-            // 실시간 Page Break 검증: 다음 라인을 배치할 위치가 아래 마진 한계를 넘는가?
             if (localY + lineH > printArea.Bottom)
             {
                 pageNum++;
                 globalY += LayoutPage.A4Dimension.Height + PageGap;
-
-                // 새 인스턴스를 생성하고 갱신
                 currentPage = new LayoutPage(pageNum, globalY);
                 pages.Add(currentPage);
-
-                // 새 페이지 규격 영역 재할당 및 상단 여백으로 좌표 강제 리셋
                 printArea = currentPage.PrintableArea;
                 localY = printArea.Top;
             }
 
             LayoutLine line = new LayoutLine();
             float lineTopGlobalY = currentPage.PageBounds.Top + localY;
+            line.StartDocPosition = lineStartDocPos;
+            line.EndDocPosition = lineEndDocPos;
 
             foreach (var run in buffer)
             {
-                // 상대 좌표(0)에서 현재 페이지의 전역 Y축 해상도 절대 위치로 맵 오프셋 가산
                 run.Bounds = new RectangleF(run.Bounds.X, lineTopGlobalY, run.Bounds.Width, lineH);
                 line.LayoutRuns.Add(run);
             }
@@ -156,11 +177,10 @@ namespace AbiCsEngine
             line.Bounds = new RectangleF(printArea.Left, lineTopGlobalY, printArea.Width, lineH);
             currentPage.Lines.Add(line);
 
-            // 중요: 다음 라인이 배치될 X, Y 제어 좌표를 완벽히 하단으로 이동 및 누적
             localX = printArea.Left;
-            localY += lineH + 5f; // 행간 여백 보정 (5픽셀 줄간격 확보)
-            lineH = 0;            // 줄 높이 초기화
-            buffer.Clear();       // 라인 세그먼트 버퍼 비우기
+            localY += lineH + 5f;
+            lineH = 0;
+            buffer.Clear();
         }
 
         private int MeasureFitCharacters(Graphics g, string text, Font font, float availableWidth)

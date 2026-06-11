@@ -40,30 +40,23 @@ namespace AbiCsEngine
         {
             caret = default;
 
-            int currentPos = 0;
-
             foreach (var page in _pages)
             {
                 foreach (var line in page.Lines)
                 {
-                    int lineLength =
-                        GetLineCharCount(line);
-
-                    if (docPosition <= currentPos + lineLength)
+                    if (docPosition >= line.StartDocPosition &&
+                        docPosition < line.EndDocPosition)
                     {
                         int offsetInLine =
-                            docPosition - currentPos;
+                            docPosition - line.StartDocPosition;
 
                         float x =
-                            GetCursorXInPage(
-                                line,
-                                offsetInLine);
+                            GetCursorXInPage(line, offsetInLine);
 
                         caret = new CaretInfo
                         {
                             Line = line,
                             OffsetInLine = offsetInLine,
-
                             X = x,
                             Y = line.Bounds.Y,
                             Height = line.Bounds.Height
@@ -71,8 +64,6 @@ namespace AbiCsEngine
 
                         return true;
                     }
-
-                    currentPos += lineLength;
                 }
             }
 
@@ -83,22 +74,7 @@ namespace AbiCsEngine
     LayoutLine targetLine,
     int targetOffset)
         {
-            int docPos = 0;
-
-            foreach (var page in _pages)
-            {
-                foreach (var line in page.Lines)
-                {
-                    if (line == targetLine)
-                    {
-                        return docPos + targetOffset;
-                    }
-
-                    docPos += GetLineCharCount(line);
-                }
-            }
-
-            return docPos;
+            return targetLine.StartDocPosition + targetOffset;
         }
 
         private void DumpRunInfo(
@@ -134,9 +110,8 @@ namespace AbiCsEngine
     _docPosition,
     out var caret))
             {
-                Debug.WriteLine(
-                    $"DocPos={_docPosition} " +
-                    $"Offset={caret.OffsetInLine}");
+                _cursorLine = caret.Line;
+                _cursorCharOffset = caret.OffsetInLine;
             }
         }
 
@@ -174,6 +149,7 @@ namespace AbiCsEngine
                 case Keys.Down:
                 case Keys.Home:
                 case Keys.End:
+                case Keys.Enter:
                     return true;
             }
             return base.IsInputKey(keyData);
@@ -194,6 +170,7 @@ namespace AbiCsEngine
                 case Keys.Down:
                 case Keys.Home:
                 case Keys.End:
+                case Keys.Enter:
                     return false;
             }
             return base.ProcessCmdKey(ref msg, keyData);
@@ -232,12 +209,9 @@ namespace AbiCsEngine
                      runIndex++)
                 {
                     var run = paragraph.Runs[runIndex];
-                    int runLength = run.Text.Length;
+                    int runLen = run.Length;
 
-                    //
-                    // Run 내부
-                    //
-                    if (docPosition < currentPos + runLength)
+                    if (docPosition < currentPos + runLen)
                     {
                         pos = new RunPosition
                         {
@@ -246,18 +220,11 @@ namespace AbiCsEngine
                             RunIndex = runIndex,
                             OffsetInRun = docPosition - currentPos
                         };
-
                         return true;
                     }
 
-                    //
-                    // Run 끝 위치
-                    //
-                    if (docPosition == currentPos + runLength)
+                    if (docPosition == currentPos + runLen)
                     {
-                        //
-                        // 다음 Run 시작으로 귀속
-                        //
                         if (runIndex + 1 < paragraph.Runs.Count)
                         {
                             pos = new RunPosition
@@ -267,26 +234,39 @@ namespace AbiCsEngine
                                 RunIndex = runIndex + 1,
                                 OffsetInRun = 0
                             };
-
                             return true;
                         }
 
-                        //
-                        // 문단 마지막 Run 끝
-                        //
                         pos = new RunPosition
                         {
                             Paragraph = paragraph,
                             Run = run,
                             RunIndex = runIndex,
-                            OffsetInRun = runLength
+                            OffsetInRun = runLen
                         };
-
                         return true;
                     }
 
-                    currentPos += runLength;
+                    currentPos += runLen;
                 }
+
+                if (docPosition == currentPos)
+                {
+                    if (paragraph.Runs.Count > 0)
+                    {
+                        var lastRun = paragraph.Runs[paragraph.Runs.Count - 1];
+                        pos = new RunPosition
+                        {
+                            Paragraph = paragraph,
+                            Run = lastRun,
+                            RunIndex = paragraph.Runs.Count - 1,
+                            OffsetInRun = lastRun.Length
+                        };
+                        return true;
+                    }
+                }
+
+                currentPos += 1; // EOP
             }
 
             return false;
@@ -357,7 +337,17 @@ namespace AbiCsEngine
             if (!TryFindRunPosition(
                 _docPosition,
                 out var pos))
+            {
+                var emptyPara = FindParagraphAtDocPos(_docPosition);
+                if (emptyPara != null)
+                {
+                    emptyPara.Runs.Add(new TextRun { Text = ch.ToString() });
+                    _docPosition++;
+                    RefreshLayout();
+                    SyncCursorFromDocPosition();
+                }
                 return;
+            }
 
             pos.Run.Text =
                 pos.Run.Text.Insert(
@@ -372,8 +362,6 @@ namespace AbiCsEngine
             RefreshLayout();
 
             SyncCursorFromDocPosition();
-
-            DumpDocPosition();
         }
 
         private void DeleteBackward()
@@ -388,6 +376,25 @@ namespace AbiCsEngine
                 out var pos))
                 return;
 
+            int paraStart = GetParagraphStartDocPos(pos.Paragraph);
+
+            if (deletePos == paraStart + pos.Paragraph.Length - 1)
+            {
+                int paraIndex = _document.Paragraphs.IndexOf(pos.Paragraph);
+                if (paraIndex >= 0 && paraIndex + 1 < _document.Paragraphs.Count)
+                {
+                    var nextPara = _document.Paragraphs[paraIndex + 1];
+                    foreach (var r in nextPara.Runs)
+                        pos.Paragraph.Runs.Add(r);
+                    _document.Paragraphs.RemoveAt(paraIndex + 1);
+                    _docPosition = deletePos;
+                    NormalizeParagraph(pos.Paragraph);
+                    RefreshLayout();
+                    SyncCursorFromDocPosition();
+                }
+                return;
+            }
+
             pos.Run.Text =
                 pos.Run.Text.Remove(
                     pos.OffsetInRun,
@@ -398,12 +405,9 @@ namespace AbiCsEngine
             NormalizeParagraph(
     pos.Paragraph);
 
-
             RefreshLayout();
 
             SyncCursorFromDocPosition();
-
-            DumpDocPosition();
         }
 
         private void RemoveEmptyRun(
@@ -489,9 +493,24 @@ namespace AbiCsEngine
                 out var pos))
                 return;
 
-            //
-            // Run 내부 삭제
-            //
+            int paraStart = GetParagraphStartDocPos(pos.Paragraph);
+
+            if (_docPosition == paraStart + pos.Paragraph.Length - 1)
+            {
+                int paraIndex = _document.Paragraphs.IndexOf(pos.Paragraph);
+                if (paraIndex >= 0 && paraIndex + 1 < _document.Paragraphs.Count)
+                {
+                    var nextPara = _document.Paragraphs[paraIndex + 1];
+                    foreach (var r in nextPara.Runs)
+                        pos.Paragraph.Runs.Add(r);
+                    _document.Paragraphs.RemoveAt(paraIndex + 1);
+                    NormalizeParagraph(pos.Paragraph);
+                    RefreshLayout();
+                    SyncCursorFromDocPosition();
+                }
+                return;
+            }
+
             if (pos.OffsetInRun < pos.Run.Text.Length)
             {
                 pos.Run.Text =
@@ -509,8 +528,6 @@ namespace AbiCsEngine
             RefreshLayout();
 
             SyncCursorFromDocPosition();
-
-            DumpDocPosition();
         }
 
         private void DeleteAcrossRunBoundary(
@@ -616,11 +633,24 @@ namespace AbiCsEngine
                     e.Handled = true;
                     break;
                 case Keys.Home:
-                    _cursorCharOffset = 0;
+                    if (_cursorLine != null)
+                    {
+                        _docPosition = _cursorLine.StartDocPosition;
+                        _cursorCharOffset = 0;
+                    }
                     e.Handled = true;
                     break;
                 case Keys.End:
-                    _cursorCharOffset = GetLineCharCount(_cursorLine);
+                    if (_cursorLine != null)
+                    {
+                        int lineLen = GetLineCharCount(_cursorLine);
+                        _docPosition = _cursorLine.StartDocPosition + lineLen;
+                        _cursorCharOffset = lineLen;
+                    }
+                    e.Handled = true;
+                    break;
+                case Keys.Enter:
+                    InsertParagraphBreak();
                     e.Handled = true;
                     break;
                 case Keys.F5:
@@ -768,6 +798,8 @@ namespace AbiCsEngine
                     targetLine,
                     targetOffset);
 
+            SyncCursorFromDocPosition();
+
             _cursorVisible = true;
 
             Invalidate();
@@ -885,36 +917,6 @@ namespace AbiCsEngine
             return globalOffset;
         }
 
-        private bool ValidateCaretFromDocPosition(
-    int docPosition,
-    out LayoutLine line,
-    out int charOffset)
-        {
-            line = null!;
-            charOffset = 0;
-
-            int currentPos = 0;
-
-            foreach (var page in _pages)
-            {
-                foreach (var layoutLine in page.Lines)
-                {
-                    int lineLength = GetLineCharCount(layoutLine);
-
-                    if (docPosition <= currentPos + lineLength)
-                    {
-                        line = layoutLine;
-                        charOffset = docPosition - currentPos;
-                        return true;
-                    }
-
-                    currentPos += lineLength;
-                }
-            }
-
-            return false;
-        }
-
         private void ValidateDocPosition()
         {
             int docPos = GetDocPositionFromCaret(
@@ -1012,25 +1014,19 @@ namespace AbiCsEngine
                 if (_cursorLine != null && _cursorVisible && this.Focused &&
                     page.Lines.Contains(_cursorLine))
                 {
-                    if (TryGetCaretInfo(
-    _docPosition,
-    out var caret))
+                    float cx =
+                        GetCursorXInPage(_cursorLine, _cursorCharOffset) + renderOffsetX;
+
+                    using (Pen pen =
+                        new Pen(Color.Black, 1.5f))
                     {
-                        float cx =
-                            caret.X + renderOffsetX;
-
-                        using (Pen pen =
-                            new Pen(Color.Black, 1.5f))
-                        {
-                            g.DrawLine(
-                                pen,
-                                cx,
-                                caret.Y,
-                                cx,
-                                caret.Y + caret.Height);
-                        }
+                        g.DrawLine(
+                            pen,
+                            cx,
+                            _cursorLine.Bounds.Y,
+                            cx,
+                            _cursorLine.Bounds.Y + _cursorLine.Height);
                     }
-
                 }
 
                 string footerText = $"Page {page.PageNumber}";
@@ -1097,28 +1093,95 @@ namespace AbiCsEngine
             }
         }
 
+        private int GetParagraphStartDocPos(Paragraph target)
+        {
+            int pos = 0;
+            foreach (var para in _document.Paragraphs)
+            {
+                if (para == target) return pos;
+                pos += para.Length;
+            }
+            return -1;
+        }
+
+        private Paragraph? FindParagraphAtDocPos(int docPos)
+        {
+            int currentPos = 0;
+            foreach (var para in _document.Paragraphs)
+            {
+                if (docPos >= currentPos && docPos < currentPos + para.Length)
+                    return para;
+                currentPos += para.Length;
+            }
+            return null;
+        }
+
+        private void InsertParagraphBreak()
+        {
+            if (!TryFindRunPosition(_docPosition, out var pos))
+                return;
+
+            Paragraph current = pos.Paragraph;
+            Paragraph newPara = new Paragraph();
+            int splitRunIndex = pos.RunIndex;
+
+            if (pos.OffsetInRun == 0)
+            {
+                for (int i = splitRunIndex; i < current.Runs.Count; i++)
+                    newPara.Runs.Add(current.Runs[i]);
+                current.Runs.RemoveRange(splitRunIndex, current.Runs.Count - splitRunIndex);
+            }
+            else if (pos.OffsetInRun < pos.Run.Text.Length)
+            {
+                TextRun run = current.Runs[splitRunIndex];
+                string rightText = run.Text.Substring(pos.OffsetInRun);
+                run.Text = run.Text.Substring(0, pos.OffsetInRun);
+
+                TextRun newRun = new TextRun
+                {
+                    Text = rightText,
+                    FontName = run.FontName,
+                    FontSize = run.FontSize,
+                    FontStyle = run.FontStyle,
+                    ForeColor = run.ForeColor
+                };
+                newPara.Runs.Add(newRun);
+
+                for (int i = splitRunIndex + 1; i < current.Runs.Count; i++)
+                    newPara.Runs.Add(current.Runs[i]);
+                current.Runs.RemoveRange(splitRunIndex + 1, current.Runs.Count - splitRunIndex - 1);
+            }
+            else
+            {
+                for (int i = splitRunIndex + 1; i < current.Runs.Count; i++)
+                    newPara.Runs.Add(current.Runs[i]);
+                current.Runs.RemoveRange(splitRunIndex + 1, current.Runs.Count - splitRunIndex - 1);
+            }
+
+            current.Runs.Add(new EopRun());
+
+            int paraIndex = _document.Paragraphs.IndexOf(current);
+            _document.Paragraphs.Insert(paraIndex + 1, newPara);
+
+            _docPosition++;
+            RefreshLayout();
+            SyncCursorFromDocPosition();
+        }
+
         private void NormalizeParagraph(
     Paragraph paragraph)
         {
-            //
-            // 빈 Run 제거
-            //
             for (int i = paragraph.Runs.Count - 1;
                  i >= 0;
                  i--)
             {
-                if (paragraph.Runs[i].Text.Length == 0)
+                if (paragraph.Runs[i].Length == 0)
                 {
                     paragraph.Runs.RemoveAt(i);
                 }
             }
 
-            //
-            // 동일 스타일 병합
-            //
             MergeAdjacentRuns(paragraph);
-
-            DumpRuns(paragraph);
 
         }
 
