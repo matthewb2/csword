@@ -31,43 +31,47 @@ namespace AbiCsEngine
         private TextRun? _caretRun;
         private int _caretRunOffset;
 
+        private readonly List<LayoutLine> _allLines = new();
+        private int _caretLineIndex;
         private int _docPosition;
 
-
-        private bool TryGetCaretInfo(
-    int docPosition,
-    out CaretInfo caret)
+        private void RebuildAllLines()
         {
-            caret = default;
+            _allLines.Clear();
 
             foreach (var page in _pages)
             {
-                foreach (var line in page.Lines)
-                {
-                    if (docPosition >= line.StartDocPosition &&
-                        docPosition < line.EndDocPosition)
-                    {
-                        int offsetInLine =
-                            docPosition - line.StartDocPosition;
-
-                        float x =
-                            GetCursorXInPage(line, offsetInLine);
-
-                        caret = new CaretInfo
-                        {
-                            Line = line,
-                            OffsetInLine = offsetInLine,
-                            X = x,
-                            Y = line.Bounds.Y,
-                            Height = line.Bounds.Height
-                        };
-
-                        return true;
-                    }
-                }
+                _allLines.AddRange(page.Lines);
             }
+        }
 
-            return false;
+        private bool TryGetCaretInfo(out float x, out float y, out float height)
+        {
+            x = 0;
+            y = 0;
+            height = 0;
+
+            if (_caretLineIndex < 0 ||
+                _caretLineIndex >= _allLines.Count)
+                return false;
+
+            LayoutLine line = _allLines[_caretLineIndex];
+
+            int offsetInLine =
+                _docPosition - line.StartDocPosition;
+
+            int lineLength =
+                line.EndDocPosition - line.StartDocPosition;
+
+            offsetInLine = Math.Max(
+                0,
+                Math.Min(offsetInLine, lineLength));
+
+            x = GetCursorXInPage(line, offsetInLine);
+            y = line.Bounds.Top;
+            height = line.Bounds.Height;
+
+            return true;
         }
 
         private int GetDocPositionFromCaret(
@@ -106,12 +110,11 @@ namespace AbiCsEngine
 
         private void SyncCursorFromDocPosition()
         {
-            if (TryGetCaretInfo(
-    _docPosition,
-    out var caret))
+            UpdateCaretLineFromDocPosition();
+            if (_caretLineIndex >= 0 && _caretLineIndex < _allLines.Count)
             {
-                _cursorLine = caret.Line;
-                _cursorCharOffset = caret.OffsetInLine;
+                _cursorLine = _allLines[_caretLineIndex];
+                _cursorCharOffset = _docPosition - _cursorLine.StartDocPosition;
             }
         }
 
@@ -438,13 +441,16 @@ namespace AbiCsEngine
                     (int)lastPage.PageBounds.Bottom + 40);
             }
 
+            RebuildAllLines();
+
             if (_caretRun != null)
             {
                 RestoreCaret();
             }
-            else if (_pages.Count > 0 && _pages[0].Lines.Count > 0)
+            else if (_allLines.Count > 0)
             {
-                _cursorLine = _pages[0].Lines[0];
+                _caretLineIndex = 0;
+                _cursorLine = _allLines[0];
                 _cursorCharOffset = 0;
             }
 
@@ -601,6 +607,8 @@ namespace AbiCsEngine
          _cursorLine!,
          _cursorCharOffset);
 
+                UpdateCaretLineFromDocPosition();
+
                 Debug.WriteLine(
                     $"MOUSE DocPos={_docPosition}");
 
@@ -612,9 +620,10 @@ namespace AbiCsEngine
         {
             base.OnKeyDown(e);
 
-            if (_cursorLine == null && _pages.Count > 0 && _pages[0].Lines.Count > 0)
+            if (_cursorLine == null && _allLines.Count > 0)
             {
-                _cursorLine = _pages[0].Lines[0];
+                _caretLineIndex = 0;
+                _cursorLine = _allLines[0];
                 _cursorCharOffset = 0;
                 e.Handled = true;
                 this.Invalidate();
@@ -774,15 +783,20 @@ namespace AbiCsEngine
     int direction)
         {
             if (!TryGetCaretInfo(
-                _docPosition,
-                out var caret))
+                out float caretX,
+                out _,
+                out _))
             {
                 return;
             }
 
+            if (_caretLineIndex < 0 ||
+                _caretLineIndex >= _allLines.Count)
+                return;
+
             LayoutLine? targetLine =
                 GetAdjacentLine(
-                    caret.Line,
+                    _allLines[_caretLineIndex],
                     direction);
 
             if (targetLine == null)
@@ -791,14 +805,18 @@ namespace AbiCsEngine
             int targetOffset =
                 GetCharOffsetFromX(
                     targetLine,
-                    caret.X);
+                    caretX);
 
             _docPosition =
                 GetDocPositionFromCaret(
                     targetLine,
                     targetOffset);
 
-            SyncCursorFromDocPosition();
+            int targetIndex = _allLines.IndexOf(targetLine);
+            if (targetIndex >= 0)
+                _caretLineIndex = targetIndex;
+            _cursorLine = targetLine;
+            _cursorCharOffset = targetOffset;
 
             _cursorVisible = true;
 
@@ -919,19 +937,15 @@ namespace AbiCsEngine
 
         private void ValidateDocPosition()
         {
-            int docPos = GetDocPositionFromCaret(
-        _cursorLine!,
-        _cursorCharOffset);
+            UpdateCaretLineFromDocPosition();
 
-            if (TryGetCaretInfo(
-    _docPosition,
-    out var caret))
+            if (_caretLineIndex >= 0 &&
+                _caretLineIndex < _allLines.Count)
             {
                 Debug.WriteLine(
                     $"DocPos={_docPosition} " +
-                    $"Offset={caret.OffsetInLine}");
+                    $"CaretLineIndex={_caretLineIndex}");
             }
-
         }
 
 
@@ -1010,22 +1024,21 @@ namespace AbiCsEngine
                         }
                     }
                 }
-
-                if (_cursorLine != null && _cursorVisible && this.Focused &&
-                    page.Lines.Contains(_cursorLine))
+                //커서 렌더링
+                if (_cursorVisible && Focused)
                 {
-                    float cx =
-                        GetCursorXInPage(_cursorLine, _cursorCharOffset) + renderOffsetX;
-
-                    using (Pen pen =
-                        new Pen(Color.Black, 1.5f))
+                    if (TryGetCaretInfo(out float cx,
+                                        out float cy,
+                                        out float ch))
                     {
-                        g.DrawLine(
+                        using var pen = new Pen(Color.Black, 1);
+
+                        e.Graphics.DrawLine(
                             pen,
-                            cx,
-                            _cursorLine.Bounds.Y,
-                            cx,
-                            _cursorLine.Bounds.Y + _cursorLine.Height);
+                            cx + renderOffsetX,
+                            cy,
+                            cx + renderOffsetX,
+                            cy + ch);
                     }
                 }
 
@@ -1039,6 +1052,44 @@ namespace AbiCsEngine
                 }
             }
         }
+
+        private void UpdateCaretLineFromDocPosition()
+        {
+            if (_allLines.Count == 0)
+            {
+                _caretLineIndex = -1;
+                return;
+            }
+
+            // 현재 라인 유지 시도
+            if (_caretLineIndex >= 0 &&
+                _caretLineIndex < _allLines.Count)
+            {
+                var current = _allLines[_caretLineIndex];
+
+                if (_docPosition >= current.StartDocPosition &&
+                    _docPosition <= current.EndDocPosition)
+                {
+                    return;
+                }
+            }
+
+            // 전체 탐색
+            for (int i = 0; i < _allLines.Count; i++)
+            {
+                var line = _allLines[i];
+
+                if (_docPosition >= line.StartDocPosition &&
+                    _docPosition <= line.EndDocPosition)
+                {
+                    _caretLineIndex = i;
+                    return;
+                }
+            }
+
+            _caretLineIndex = _allLines.Count - 1;
+        }
+
 
         protected override void OnResize(EventArgs e)
         {

@@ -21,6 +21,10 @@ namespace AbiCsEngine
         public float Height => Bounds.Height;
         public int StartDocPosition { get; set; }
         public int EndDocPosition { get; set; }
+        public float X;
+        public float Y;
+        
+
     }
 
     // 물리적으로 페이지 분할(Page Break)이 완료된 한 페이지 (A4 규격)
