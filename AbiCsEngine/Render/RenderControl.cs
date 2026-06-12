@@ -216,7 +216,7 @@ namespace AbiCsEngine
                         };
                         return true;
                     }
-
+                    /*
                     if (docPosition == currentPos + runLen)
                     {
                         if (runIndex + 1 < paragraph.Runs.Count)
@@ -240,7 +240,7 @@ namespace AbiCsEngine
                         };
                         return true;
                     }
-
+                    */
                     currentPos += runLen;
                 }
 
@@ -968,6 +968,14 @@ namespace AbiCsEngine
             return Math.Max(30, (this.ClientSize.Width - LayoutPage.A4Dimension.Width) / 2);
         }
 
+        float GetLineTop(List<LayoutLine> lines, int index)
+        {
+            if (index == 0)
+                return lines[0].Bounds.Y;
+
+            return lines[index - 1].Bounds.Bottom;
+        }
+
         protected override void OnPaint(PaintEventArgs e)
         {
             base.OnPaint(e);
@@ -985,33 +993,89 @@ namespace AbiCsEngine
                     page.PageBounds.Width, page.PageBounds.Height);
 
                 g.FillRectangle(Brushes.White, paperRect);
-                
-                foreach (var line in page.Lines)
+
+                for (int i = 0; i < page.Lines.Count; i++)
                 {
+                    var line = page.Lines[i];
+                    bool isEmpty =
+                        line.LayoutRuns == null ||
+                        line.LayoutRuns.Count == 0;
+
+                    float x = renderOffsetX + page.PrintableArea.Left;
+                    float y = GetLineTop(page.Lines, i); // ⭐ 핵심
+                    float lineHeight = Math.Max(line.Bounds.Height, 18f);
+
+                    // =========================
+                    // 1. 빈 줄 처리
+                    // =========================
+                    if (isEmpty)
+                    {
+
+                        // ✔ 빈 문단 부호 (안전하게 표시)
+                        using (Font pilcrowFont = new Font("맑은 고딕", 11, FontStyle.Regular))
+                        {
+                            g.DrawString(
+                                "\u00B6", // ¶
+                                pilcrowFont,
+                                Brushes.LightGray,
+                                x,
+                                y);
+                        }
+
+                        continue;
+                    }
+
+                    // =========================
+                    // 2. 일반 텍스트 라인
+                    // =========================
                     foreach (var run in line.LayoutRuns)
                     {
-                        using (Font font = new Font(run.StyleSource.FontName, run.StyleSource.FontSize, run.StyleSource.FontStyle))
+                        using (Font font = new Font(
+                            run.StyleSource.FontName,
+                            run.StyleSource.FontSize,
+                            run.StyleSource.FontStyle))
                         using (Brush brush = new SolidBrush(run.StyleSource.ForeColor))
                         using (StringFormat sf = new StringFormat(StringFormat.GenericTypographic))
                         {
-                            sf.FormatFlags |=
-    StringFormatFlags.MeasureTrailingSpaces;
+                            sf.FormatFlags |= StringFormatFlags.MeasureTrailingSpaces;
+
                             float targetX = run.Bounds.X + renderOffsetX;
+
                             g.DrawString(run.Text, font, brush, targetX, run.Bounds.Y, sf);
                         }
                     }
 
-                    if (line.EndDocPosition - line.StartDocPosition > GetLineCharCount(line))
+                    // =========================
+                    // 3. 문단 부호 (EOP 표시)
+                    // =========================
+                    bool showPilcrow =
+                        (line.EndDocPosition - line.StartDocPosition) > GetLineCharCount(line);
+
+                    if (showPilcrow)
                     {
                         var lastRun = line.LayoutRuns[^1];
-                        using (Font pilcrowFont = new Font(lastRun.StyleSource.FontName, lastRun.StyleSource.FontSize, lastRun.StyleSource.FontStyle))
+
+                        using (Font pilcrowFont = new Font(
+                            lastRun.StyleSource.FontName,
+                            lastRun.StyleSource.FontSize,
+                            lastRun.StyleSource.FontStyle))
                         {
-                            float pilcrowX = GetCursorXInPage(line, GetLineCharCount(line)) + renderOffsetX;
-                            g.DrawString("\u21B5", pilcrowFont, Brushes.LightGray, pilcrowX, line.Bounds.Y);
+                            float pilcrowX =
+                                GetCursorXInPage(line, GetLineCharCount(line)) + renderOffsetX;
+
+                            g.DrawString(
+                                "\u00B6",
+                                pilcrowFont,
+                                Brushes.LightGray,
+                                pilcrowX,
+                                line.Bounds.Y);
                         }
                     }
                 }
-                //커서 렌더링
+
+                // =========================
+                // 4. 커서
+                // =========================
                 if (_cursorVisible && Focused)
                 {
                     if (TryGetCaretInfo(out float cx,
@@ -1020,7 +1084,7 @@ namespace AbiCsEngine
                     {
                         using var pen = new Pen(Color.Black, 1);
 
-                        e.Graphics.DrawLine(
+                        g.DrawLine(
                             pen,
                             cx + renderOffsetX,
                             cy,
@@ -1029,11 +1093,18 @@ namespace AbiCsEngine
                     }
                 }
 
+                // =========================
+                // 5. 페이지 번호
+                // =========================
                 string footerText = $"Page {page.PageNumber}";
                 using (Font footerFont = new Font("Segoe UI", 9))
                 {
                     SizeF size = g.MeasureString(footerText, footerFont);
-                    g.DrawString(footerText, footerFont, Brushes.Gray,
+
+                    g.DrawString(
+                        footerText,
+                        footerFont,
+                        Brushes.Gray,
                         paperRect.X + (paperRect.Width / 2) - (size.Width / 2),
                         paperRect.Bottom - 35);
                 }
@@ -1055,7 +1126,7 @@ namespace AbiCsEngine
                 var current = _allLines[_caretLineIndex];
 
                 if (_docPosition >= current.StartDocPosition &&
-                    _docPosition <= current.EndDocPosition)
+                    _docPosition < current.EndDocPosition)
                 {
                     return;
                 }
@@ -1067,14 +1138,18 @@ namespace AbiCsEngine
                 var line = _allLines[i];
 
                 if (_docPosition >= line.StartDocPosition &&
-                    _docPosition <= line.EndDocPosition)
+                    _docPosition < line.EndDocPosition)
                 {
                     _caretLineIndex = i;
                     return;
                 }
             }
 
-            _caretLineIndex = _allLines.Count - 1;
+            if (_allLines.Count > 0 &&
+    _docPosition == _allLines[^1].EndDocPosition)
+            {
+                _caretLineIndex = _allLines.Count - 1;
+            }
         }
 
 
@@ -1156,23 +1231,56 @@ namespace AbiCsEngine
 
         private void InsertParagraphBreak()
         {
+            
             if (!TryFindRunPosition(
                 _docPosition,
                 out var pos))
                 return;
 
-            Paragraph current =
-                pos.Paragraph;
+            Debug.WriteLine(
+    $"ENTER DocPos={_docPosition}");
 
-            Paragraph newPara =
-                new Paragraph();
+            Debug.WriteLine(
+                $"RunType={pos.Run.GetType().Name}");
 
-            int splitRunIndex =
-                pos.RunIndex;
+            Debug.WriteLine(
+                $"RunLength={pos.Run.Length}");
 
-            //
-            // 현재 문단 EOP 제거
-            //
+            Debug.WriteLine(
+                $"TextLength={pos.Run.Text.Length}");
+
+            Debug.WriteLine(
+                $"OffsetInRun={pos.OffsetInRun}");
+
+
+            Paragraph current = pos.Paragraph;
+            Paragraph newPara = new Paragraph();
+            int paraIndex;
+
+            if (pos.Run is EopRun)
+            {
+                newPara = new Paragraph();
+                newPara.Runs.Add(new EopRun());
+
+                paraIndex =
+                    _document.Paragraphs.IndexOf(
+                        pos.Paragraph);
+
+                _document.Paragraphs.Insert(
+                    paraIndex + 1,
+                    newPara);
+
+                _docPosition =
+                    GetParagraphStartDocPos(
+                        newPara);
+
+                RefreshLayout();
+                SyncCursorFromDocPosition();
+                return;
+            }
+
+
+
             if (current.Runs.Count > 0 &&
                 current.Runs[^1] is EopRun)
             {
@@ -1180,9 +1288,8 @@ namespace AbiCsEngine
                     current.Runs.Count - 1);
             }
 
-            //
-            // Run 분할
-            //
+            int splitRunIndex = pos.RunIndex;
+
             if (pos.OffsetInRun == 0)
             {
                 for (int i = splitRunIndex;
@@ -1199,31 +1306,27 @@ namespace AbiCsEngine
             }
             else if (pos.OffsetInRun < pos.Run.Text.Length)
             {
-                TextRun leftRun =
+                TextRun run =
                     current.Runs[splitRunIndex];
 
-                string left =
-                    leftRun.Text.Substring(
+                string rightText =
+                    run.Text.Substring(
+                        pos.OffsetInRun);
+
+                run.Text =
+                    run.Text.Substring(
                         0,
                         pos.OffsetInRun);
 
-                string right =
-                    leftRun.Text.Substring(
-                        pos.OffsetInRun);
-
-                leftRun.Text = left;
-
-                TextRun rightRun =
+                newPara.Runs.Add(
                     new TextRun
                     {
-                        Text = right,
-                        FontName = leftRun.FontName,
-                        FontSize = leftRun.FontSize,
-                        FontStyle = leftRun.FontStyle,
-                        ForeColor = leftRun.ForeColor
-                    };
-
-                newPara.Runs.Add(rightRun);
+                        Text = rightText,
+                        FontName = run.FontName,
+                        FontSize = run.FontSize,
+                        FontStyle = run.FontStyle,
+                        ForeColor = run.ForeColor
+                    });
 
                 for (int i = splitRunIndex + 1;
                      i < current.Runs.Count;
@@ -1251,25 +1354,19 @@ namespace AbiCsEngine
                     splitRunIndex + 1,
                     current.Runs.Count - splitRunIndex - 1);
             }
+            // EOP 추가
+            current.Runs.Add(new EopRun());
+            newPara.Runs.Add(new EopRun());
 
-            //
-            // 양쪽 문단 EOP 보장
-            //
-            NormalizeParagraph(current);
-            NormalizeParagraph(newPara);
-
-            int paraIndex =
-                _document.Paragraphs.IndexOf(
-                    current);
-
+            paraIndex =
+                _document.Paragraphs.IndexOf(current);
+            // 문단 삽입
             _document.Paragraphs.Insert(
                 paraIndex + 1,
                 newPara);
 
-            //
-            // 커서는 새 문단 시작
-            //
-            _docPosition++;
+            _docPosition =
+    GetParagraphStartDocPos(newPara);
 
             RefreshLayout();
 

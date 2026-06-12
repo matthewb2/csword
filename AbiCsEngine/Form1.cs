@@ -27,6 +27,11 @@ namespace AbiCsEngine
     new EopRun());
             doc.Paragraphs.Add(pTitle);
 
+            Paragraph pBlank = new Paragraph();
+            pBlank.Runs.Add(
+    new EopRun());
+            doc.Paragraphs.Add(pBlank);
+
             // 레이아웃 엔진이 Line Break와 Page Break를 유발하는지 검증하기 위한 대량 문단 반복 루프
             for (int i = 1; i <= 5; i++)
             {

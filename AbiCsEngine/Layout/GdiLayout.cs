@@ -29,6 +29,7 @@ namespace AbiCsEngine
 
             foreach (var para in doc.Paragraphs)
             {
+
                 bool hasEopRun = false;
 
                 foreach (var run in para.Runs)
@@ -37,13 +38,18 @@ namespace AbiCsEngine
                     {
                         hasEopRun = true;
                         docPos++;
-                        if (currentLineBuffer.Count > 0)
+
+                        // 🔥 핵심: 무조건 "빈 줄 생성"
+                        if (currentLineBuffer.Count == 0)
                         {
-                            FlushLine(ref currentPage, currentLineBuffer,
-                                ref localX, ref localY, ref currentLineHeight,
-                                printArea, ref currentPageNum, ref currentGlobalY,
-                                pages, lineStartDocPos, docPos);
-                            printArea = currentPage.PrintableArea;
+                            FlushEmptyLine(
+                                ref currentPage,
+                                ref localY,
+                                ref currentPageNum,
+                                ref currentGlobalY,
+                                pages,
+                                lineStartDocPos,
+                                docPos);
                         }
                         else
                         {
@@ -51,9 +57,11 @@ namespace AbiCsEngine
                                 ref localX, ref localY, ref currentLineHeight,
                                 printArea, ref currentPageNum, ref currentGlobalY,
                                 pages, lineStartDocPos, docPos);
-                            printArea = currentPage.PrintableArea;
                         }
+
+                        printArea = currentPage.PrintableArea;
                         lineStartDocPos = docPos;
+
                         continue;
                     }
 
@@ -147,6 +155,35 @@ namespace AbiCsEngine
 
             return pages;
         }
+
+        private void FlushEmptyLine(
+    ref LayoutPage currentPage,
+    ref float localY,
+    ref int currentPageNum,
+    ref float currentGlobalY,
+    List<LayoutPage> pages,
+    int startDocPos,
+    int endDocPos)
+        {
+            float lineHeight = 18f; // 🔥 최소 줄 높이
+
+            LayoutLine line = new LayoutLine
+            {
+                LayoutRuns = new List<LayoutRun>(),
+                Bounds = new RectangleF(
+                    currentPage.PrintableArea.Left,
+                    localY,
+                    currentPage.PrintableArea.Width,
+                    lineHeight),
+                StartDocPosition = startDocPos,
+                EndDocPosition = endDocPos
+            };
+
+            currentPage.Lines.Add(line);
+
+            localY += lineHeight;
+        }
+
 
         private void FlushLine(ref LayoutPage currentPage, List<LayoutRun> buffer,
             ref float localX, ref float localY, ref float lineH, RectangleF printArea,
