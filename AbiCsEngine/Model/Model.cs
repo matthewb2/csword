@@ -12,11 +12,16 @@ namespace AbiCsEngine
         public Color ForeColor { get; set; } = Color.Black;
         public virtual int Length => Text.Length;
     }
-
-    public class EopRun : TextRun
+    public sealed class EopRun : TextRun
     {
+        public EopRun()
+        {
+            Text = string.Empty;
+        }
+
         public override int Length => 1;
     }
+
 
     public class Paragraph
     {
@@ -27,12 +32,14 @@ namespace AbiCsEngine
             get
             {
                 int len = 0;
+
                 foreach (var run in Runs)
                     len += run.Length;
-                len += 1; // EOP
+
                 return len;
             }
         }
+
     }
 
     public class Document

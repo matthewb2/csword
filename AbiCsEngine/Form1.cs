@@ -23,6 +23,8 @@ namespace AbiCsEngine
             // 타이틀 문단
             Paragraph pTitle = new Paragraph();
             pTitle.Runs.Add(new TextRun { Text = "AbiWord C# 레이아웃 명세서 문서", FontSize = 24, FontStyle = FontStyle.Bold, ForeColor = Color.AntiqueWhite });
+            pTitle.Runs.Add(
+    new EopRun());
             doc.Paragraphs.Add(pTitle);
 
             // 레이아웃 엔진이 Line Break와 Page Break를 유발하는지 검증하기 위한 대량 문단 반복 루프
@@ -34,7 +36,11 @@ namespace AbiCsEngine
                 p.Runs.Add(new TextRun { Text = "GDI+ Graphics Subsystem", FontSize = 11, FontStyle = FontStyle.Italic, ForeColor = Color.Blue, FontName = "Consolas" });
                 p.Runs.Add(new TextRun { Text = " 내부에서 상하좌우 여백(Margins) 바운더리를 연산하다가 가로 임계점을 돌파하면 자동으로 Line Break를 유발하며, 누적된 Y 높이가 A4 하단 한계선인 1123 픽셀을 돌파하는 즉시 데이터 손실 없이 완벽하게 다음 순번의 LayoutPage 객체로 전이되어 물리적인 Page Break 처리를 완결짓습니다.", FontSize = 11, FontName = "맑은 고딕" });
 
+                p.Runs.Add(
+    new EopRun());
+
                 doc.Paragraphs.Add(p);
+
             }
 
             // 엔진 가동 및 화면 바인딩

@@ -259,8 +259,6 @@ namespace AbiCsEngine
                         return true;
                     }
                 }
-
-                currentPos += 1; // EOP
             }
 
             return false;
@@ -386,10 +384,46 @@ namespace AbiCsEngine
             }
         }
 
+        private void DumpDocument()
+        {
+            if (_document == null)
+                return;
+
+            Debug.WriteLine("========== DOCUMENT ==========");
+
+            for (int p = 0; p < _document.Paragraphs.Count; p++)
+            {
+                var para = _document.Paragraphs[p];
+
+                Debug.WriteLine(
+                    $"Paragraph[{p}] Length={para.Length}");
+
+                for (int r = 0; r < para.Runs.Count; r++)
+                {
+                    var run = para.Runs[r];
+
+                    if (run is EopRun)
+                    {
+                        Debug.WriteLine(
+                            $"   Run[{r}] EOP Length={run.Length}");
+                    }
+                    else
+                    {
+                        Debug.WriteLine(
+                            $"   Run[{r}] Text='{run.Text}' Length={run.Length}");
+                    }
+                }
+            }
+
+            Debug.WriteLine("==============================");
+        }
+
 
         public void RefreshLayout()
         {
             if (_document == null) return;
+
+            DumpDocument();
 
             using (Graphics g = this.CreateGraphics())
             {
@@ -966,6 +1000,16 @@ namespace AbiCsEngine
                             g.DrawString(run.Text, font, brush, targetX, run.Bounds.Y, sf);
                         }
                     }
+
+                    if (line.EndDocPosition - line.StartDocPosition > GetLineCharCount(line))
+                    {
+                        var lastRun = line.LayoutRuns[^1];
+                        using (Font pilcrowFont = new Font(lastRun.StyleSource.FontName, lastRun.StyleSource.FontSize, lastRun.StyleSource.FontStyle))
+                        {
+                            float pilcrowX = GetCursorXInPage(line, GetLineCharCount(line)) + renderOffsetX;
+                            g.DrawString("\u21B5", pilcrowFont, Brushes.LightGray, pilcrowX, line.Bounds.Y);
+                        }
+                    }
                 }
                 //커서 렌더링
                 if (_cursorVisible && Focused)
@@ -1112,74 +1156,147 @@ namespace AbiCsEngine
 
         private void InsertParagraphBreak()
         {
-            if (!TryFindRunPosition(_docPosition, out var pos))
+            if (!TryFindRunPosition(
+                _docPosition,
+                out var pos))
                 return;
 
-            Paragraph current = pos.Paragraph;
-            Paragraph newPara = new Paragraph();
-            int splitRunIndex = pos.RunIndex;
+            Paragraph current =
+                pos.Paragraph;
 
+            Paragraph newPara =
+                new Paragraph();
+
+            int splitRunIndex =
+                pos.RunIndex;
+
+            //
+            // 현재 문단 EOP 제거
+            //
+            if (current.Runs.Count > 0 &&
+                current.Runs[^1] is EopRun)
+            {
+                current.Runs.RemoveAt(
+                    current.Runs.Count - 1);
+            }
+
+            //
+            // Run 분할
+            //
             if (pos.OffsetInRun == 0)
             {
-                for (int i = splitRunIndex; i < current.Runs.Count; i++)
-                    newPara.Runs.Add(current.Runs[i]);
-                current.Runs.RemoveRange(splitRunIndex, current.Runs.Count - splitRunIndex);
+                for (int i = splitRunIndex;
+                     i < current.Runs.Count;
+                     i++)
+                {
+                    newPara.Runs.Add(
+                        current.Runs[i]);
+                }
+
+                current.Runs.RemoveRange(
+                    splitRunIndex,
+                    current.Runs.Count - splitRunIndex);
             }
             else if (pos.OffsetInRun < pos.Run.Text.Length)
             {
-                TextRun run = current.Runs[splitRunIndex];
-                string rightText = run.Text.Substring(pos.OffsetInRun);
-                run.Text = run.Text.Substring(0, pos.OffsetInRun);
+                TextRun leftRun =
+                    current.Runs[splitRunIndex];
 
-                TextRun newRun = new TextRun
+                string left =
+                    leftRun.Text.Substring(
+                        0,
+                        pos.OffsetInRun);
+
+                string right =
+                    leftRun.Text.Substring(
+                        pos.OffsetInRun);
+
+                leftRun.Text = left;
+
+                TextRun rightRun =
+                    new TextRun
+                    {
+                        Text = right,
+                        FontName = leftRun.FontName,
+                        FontSize = leftRun.FontSize,
+                        FontStyle = leftRun.FontStyle,
+                        ForeColor = leftRun.ForeColor
+                    };
+
+                newPara.Runs.Add(rightRun);
+
+                for (int i = splitRunIndex + 1;
+                     i < current.Runs.Count;
+                     i++)
                 {
-                    Text = rightText,
-                    FontName = run.FontName,
-                    FontSize = run.FontSize,
-                    FontStyle = run.FontStyle,
-                    ForeColor = run.ForeColor
-                };
-                newPara.Runs.Add(newRun);
+                    newPara.Runs.Add(
+                        current.Runs[i]);
+                }
 
-                for (int i = splitRunIndex + 1; i < current.Runs.Count; i++)
-                    newPara.Runs.Add(current.Runs[i]);
-                current.Runs.RemoveRange(splitRunIndex + 1, current.Runs.Count - splitRunIndex - 1);
+                current.Runs.RemoveRange(
+                    splitRunIndex + 1,
+                    current.Runs.Count - splitRunIndex - 1);
             }
             else
             {
-                for (int i = splitRunIndex + 1; i < current.Runs.Count; i++)
-                    newPara.Runs.Add(current.Runs[i]);
-                current.Runs.RemoveRange(splitRunIndex + 1, current.Runs.Count - splitRunIndex - 1);
+                for (int i = splitRunIndex + 1;
+                     i < current.Runs.Count;
+                     i++)
+                {
+                    newPara.Runs.Add(
+                        current.Runs[i]);
+                }
+
+                current.Runs.RemoveRange(
+                    splitRunIndex + 1,
+                    current.Runs.Count - splitRunIndex - 1);
             }
 
-            current.Runs.Add(new EopRun());
+            //
+            // 양쪽 문단 EOP 보장
+            //
+            NormalizeParagraph(current);
+            NormalizeParagraph(newPara);
 
-            int paraIndex = _document.Paragraphs.IndexOf(current);
-            _document.Paragraphs.Insert(paraIndex + 1, newPara);
+            int paraIndex =
+                _document.Paragraphs.IndexOf(
+                    current);
 
+            _document.Paragraphs.Insert(
+                paraIndex + 1,
+                newPara);
+
+            //
+            // 커서는 새 문단 시작
+            //
             _docPosition++;
+
             RefreshLayout();
+
             SyncCursorFromDocPosition();
         }
 
         private void NormalizeParagraph(
     Paragraph paragraph)
         {
-            for (int i = paragraph.Runs.Count - 1;
-                 i >= 0;
-                 i--)
+            for (int i = paragraph.Runs.Count - 1; i >= 0; i--)
             {
+                if (paragraph.Runs[i] is EopRun)
+                    continue;
+
                 if (paragraph.Runs[i].Length == 0)
-                {
                     paragraph.Runs.RemoveAt(i);
-                }
             }
 
             MergeAdjacentRuns(paragraph);
 
+            bool hasEop =
+                paragraph.Runs.Count > 0 &&
+                paragraph.Runs[^1] is EopRun;
+
+            if (!hasEop)
+                paragraph.Runs.Add(new EopRun());
         }
-
-
 
     }
 }
