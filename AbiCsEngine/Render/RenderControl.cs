@@ -9,15 +9,6 @@ namespace AbiCsEngine
     public class RenderControl : UserControl
     {
 
-        private struct CaretInfo
-        {
-            public LayoutLine Line;
-            public int OffsetInLine;
-
-            public float X;
-            public float Y;
-            public float Height;
-        }
 
         private Document? _document;
         private List<LayoutPage> _pages = new List<LayoutPage>();
@@ -273,34 +264,6 @@ namespace AbiCsEngine
             }
 
             return false;
-        }
-
-        private void DumpRunPosition(int docPosition)
-        {
-            if (TryFindRunPosition(docPosition, out var pos))
-            {
-                Debug.WriteLine(
-                    $"DocPos={docPosition} " +
-                    $"RunIndex={pos.RunIndex} " +
-                    $"OffsetInRun={pos.OffsetInRun} " +
-                    $"Text='{pos.Run.Text}'");
-            }
-        }
-
-
-
-        private void DumpDocPosition()
-        {
-            if (TryFindRunPosition(
-                _docPosition,
-                out var pos))
-            {
-                Debug.WriteLine(
-                    $"DocPos={_docPosition} " +
-                    $"RunIndex={pos.RunIndex} " +
-                    $"Offset={pos.OffsetInRun} " +
-                    $"Text='{pos.Run.Text}'");
-            }
         }
 
 
@@ -642,19 +605,19 @@ namespace AbiCsEngine
                     e.Handled = true;
                     break;
                 case Keys.Home:
-                    if (_cursorLine != null)
+                    if (_allLines[_caretLineIndex] != null)
                     {
-                        _docPosition = _cursorLine.StartDocPosition;
-                        _cursorCharOffset = 0;
+                        _docPosition = _allLines[_caretLineIndex].StartDocPosition;
+                        //_cursorCharOffset = 0;
                     }
                     e.Handled = true;
                     break;
                 case Keys.End:
-                    if (_cursorLine != null)
+                    if (_allLines[_caretLineIndex] != null)
                     {
-                        int lineLen = GetLineCharCount(_cursorLine);
-                        _docPosition = _cursorLine.StartDocPosition + lineLen;
-                        _cursorCharOffset = lineLen;
+                        int lineLen = GetLineCharCount(_allLines[_caretLineIndex]);
+                        _docPosition = _allLines[_caretLineIndex].StartDocPosition + lineLen;
+                        //_cursorCharOffset = lineLen;
                     }
                     e.Handled = true;
                     break;
@@ -692,26 +655,6 @@ namespace AbiCsEngine
             DumpRunInfo(_cursorLine!, _cursorCharOffset);
 
             ValidateDocPosition();
-        }
-
-        private void DumpRuns(
-    Paragraph paragraph)
-        {
-            Debug.WriteLine(
-                "----- RUNS -----");
-
-            for (int i = 0;
-                 i < paragraph.Runs.Count;
-                 i++)
-            {
-                var run = paragraph.Runs[i];
-
-                Debug.WriteLine(
-                    $"[{i}] '{run.Text}' " +
-                    $"{run.FontName} " +
-                    $"{run.FontSize} " +
-                    $"{run.FontStyle}");
-            }
         }
 
         private void MoveDocPositionLeft()
