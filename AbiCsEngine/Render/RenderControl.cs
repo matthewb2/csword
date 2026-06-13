@@ -61,7 +61,7 @@ namespace AbiCsEngine
                 _docPosition - line.StartDocPosition;
 
             int lineLength =
-                line.EndDocPosition - line.StartDocPosition;
+    GetLineCharCount(line);
 
             offsetInLine = Math.Max(
                 0,
@@ -212,8 +212,13 @@ namespace AbiCsEngine
                      runIndex++)
                 {
                     var run = paragraph.Runs[runIndex];
-                    int runLen = run.Length;
 
+                    int runLen =
+                        run is EopRun
+                            ? 1
+                            : run.Text.Length;
+
+                    // 현재 Run 내부
                     if (docPosition < currentPos + runLen)
                     {
                         pos = new RunPosition
@@ -223,25 +228,42 @@ namespace AbiCsEngine
                             RunIndex = runIndex,
                             OffsetInRun = docPosition - currentPos
                         };
-                        return true;
-                    }
-                    currentPos += runLen;
-                }
 
-                if (docPosition == currentPos)
-                {
-                    if (paragraph.Runs.Count > 0)
-                    {
-                        var lastRun = paragraph.Runs[paragraph.Runs.Count - 1];
-                        pos = new RunPosition
-                        {
-                            Paragraph = paragraph,
-                            Run = lastRun,
-                            RunIndex = paragraph.Runs.Count - 1,
-                            OffsetInRun = lastRun.Length
-                        };
                         return true;
                     }
+
+                    // 현재 Run 바로 뒤
+                    if (docPosition == currentPos + runLen)
+                    {
+                        if (runIndex + 1 < paragraph.Runs.Count)
+                        {
+                            pos = new RunPosition
+                            {
+                                Paragraph = paragraph,
+                                Run = paragraph.Runs[runIndex + 1],
+                                RunIndex = runIndex + 1,
+                                OffsetInRun = 0
+                            };
+
+                            return true;
+                        }
+
+                        // 문단 끝이면 EOP 뒤
+                        if (run is EopRun)
+                        {
+                            pos = new RunPosition
+                            {
+                                Paragraph = paragraph,
+                                Run = run,
+                                RunIndex = runIndex,
+                                OffsetInRun = 1
+                            };
+
+                            return true;
+                        }
+                    }
+
+                    currentPos += runLen;
                 }
             }
 
@@ -827,6 +849,12 @@ namespace AbiCsEngine
                 }
                 remaining -= runLen;
                 x += run.Bounds.Width;
+                if (remaining == 0)
+                    return x;
+                if (run.StyleSource is EopRun)
+                {
+                    return x + run.Bounds.Width;
+                }
             }
             return x;
         }
@@ -905,6 +933,16 @@ namespace AbiCsEngine
 
                 globalOffset += runLen;
                 runStartX = runEndX;
+            }
+            // 라인 오른쪽 여백을 클릭했을 때 텍스트 끝으로 이동
+            if (line.LayoutRuns.Count > 0)
+            {
+                LayoutRun lastRun = line.LayoutRuns[^1];
+
+                if (lastRun.StyleSource is EopRun)
+                {
+                    return Math.Max(0, globalOffset - 1);
+                }
             }
 
             return globalOffset;
@@ -1235,48 +1273,35 @@ namespace AbiCsEngine
 
         private void InsertParagraphBreak()
         {
-            
             if (!TryFindRunPosition(
                 _docPosition,
                 out var pos))
+            {
                 return;
+            }
 
-            Debug.WriteLine(
-    $"ENTER DocPos={_docPosition}");
+            Paragraph currentPara =
+                pos.Paragraph;
 
-            Debug.WriteLine(
-                $"RunType={pos.Run.GetType().Name}");
+            Paragraph newPara =
+                new Paragraph();
 
-            Debug.WriteLine(
-                $"RunLength={pos.Run.Length}");
-
-            Debug.WriteLine(
-                $"TextLength={pos.Run.Text.Length}");
-
-            Debug.WriteLine(
-                $"OffsetInRun={pos.OffsetInRun}");
-
-
-            Paragraph current = pos.Paragraph;
-            Paragraph newPara = new Paragraph();
-            int paraIndex;
-
-
+            int paraIndex =
+                _document.Paragraphs.IndexOf(
+                    currentPara);
             if (pos.Run is EopRun)
             {
                 newPara = new Paragraph();
-                newPara.Runs.Add(new EopRun());
+                NormalizeParagraph(newPara);
 
                 paraIndex =
-                    _document.Paragraphs.IndexOf(
-                        pos.Paragraph);
+                    _document.Paragraphs.IndexOf(pos.Paragraph);
 
                 _document.Paragraphs.Insert(
                     paraIndex + 1,
                     newPara);
 
-                _docPosition =
-                    GetParagraphStartDocPos(newPara) + 1;
+                _docPosition++;
 
                 RefreshLayout();
                 SyncCursorFromDocPosition();
@@ -1284,96 +1309,81 @@ namespace AbiCsEngine
             }
 
 
-            if (current.Runs.Count > 0 &&
-                current.Runs[^1] is EopRun)
+            // 1. 커서 위치 이후 내용을 새 문단으로 이동
+            if (pos.Run is TextRun textRun)
             {
-                current.Runs.RemoveAt(
-                    current.Runs.Count - 1);
-            }
+                int offset = Math.Max(
+    0,
+    Math.Min(
+        pos.OffsetInRun,
+        textRun.Text.Length));
 
-            int splitRunIndex = pos.RunIndex;
+                Debug.WriteLine(
+    $"RunText='{textRun.Text}' " +
+    $"TextLength={textRun.Text.Length} " +
+    $"OffsetInRun={pos.OffsetInRun}");
 
-            if (pos.OffsetInRun == 0)
-            {
-                for (int i = splitRunIndex;
-                     i < current.Runs.Count;
-                     i++)
-                {
-                    newPara.Runs.Add(
-                        current.Runs[i]);
-                }
-
-                current.Runs.RemoveRange(
-                    splitRunIndex,
-                    current.Runs.Count - splitRunIndex);
-            }
-            else if (pos.OffsetInRun < pos.Run.Text.Length)
-            {
-                TextRun run =
-                    current.Runs[splitRunIndex];
-
-                string rightText =
-                    run.Text.Substring(
-                        pos.OffsetInRun);
-
-                run.Text =
-                    run.Text.Substring(
+                string left =
+                    textRun.Text.Substring(
                         0,
                         pos.OffsetInRun);
 
-                newPara.Runs.Add(
-                    new TextRun
-                    {
-                        Text = rightText,
-                        FontName = run.FontName,
-                        FontSize = run.FontSize,
-                        FontStyle = run.FontStyle,
-                        ForeColor = run.ForeColor
-                    });
+                string right =
+                    textRun.Text.Substring(
+                        pos.OffsetInRun);
 
-                for (int i = splitRunIndex + 1;
-                     i < current.Runs.Count;
+                textRun.Text = left;
+
+                if (textRun.Text.Length == 0)
+                {
+                    currentPara.Runs.Remove(textRun);
+                }
+
+
+                if (right.Length > 0)
+                {
+                    newPara.Runs.Add(
+                        new TextRun
+                        {
+                            Text = right,
+                            FontName = textRun.FontName,
+                            FontSize = textRun.FontSize,
+                            FontStyle = textRun.FontStyle,
+                            ForeColor = textRun.ForeColor
+                        });
+                }
+
+                for (int i = pos.RunIndex + 1;
+                     i < currentPara.Runs.Count;
                      i++)
                 {
                     newPara.Runs.Add(
-                        current.Runs[i]);
+                        currentPara.Runs[i]);
                 }
 
-                current.Runs.RemoveRange(
-                    splitRunIndex + 1,
-                    current.Runs.Count - splitRunIndex - 1);
+                currentPara.Runs.RemoveRange(
+                    pos.RunIndex + 1,
+                    currentPara.Runs.Count -
+                    (pos.RunIndex + 1));
             }
-            else
-            {
-                for (int i = splitRunIndex + 1;
-                     i < current.Runs.Count;
-                     i++)
-                {
-                    newPara.Runs.Add(
-                        current.Runs[i]);
-                }
 
-                current.Runs.RemoveRange(
-                    splitRunIndex + 1,
-                    current.Runs.Count - splitRunIndex - 1);
-            }
-            // EOP 추가
-            current.Runs.Add(new EopRun());
-            newPara.Runs.Add(new EopRun());
+            // 2. EOP 보장
+            NormalizeParagraph(currentPara);
+            NormalizeParagraph(newPara);
 
-            paraIndex =
-                _document.Paragraphs.IndexOf(current);
-            // 문단 삽입
+            // 3. 새 문단 삽입
             _document.Paragraphs.Insert(
                 paraIndex + 1,
                 newPara);
 
-            _docPosition =
-    GetParagraphStartDocPos(newPara) + 1;
+            // 4. Enter = EOP 1개 소비
+            _docPosition++;
 
             RefreshLayout();
 
             SyncCursorFromDocPosition();
+
+            Invalidate();
         }
 
         private void NormalizeParagraph(
