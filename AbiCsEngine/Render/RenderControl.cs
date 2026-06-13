@@ -36,6 +36,15 @@ namespace AbiCsEngine
             }
         }
 
+        private static int GetRunLogicalLength(
+    LayoutRun run)
+        {
+            return run.StyleSource is EopRun
+                ? 1
+                : run.Text.Length;
+        }
+
+
         private bool TryGetCaretInfo(out float x, out float y, out float height)
         {
             x = 0;
@@ -216,31 +225,6 @@ namespace AbiCsEngine
                         };
                         return true;
                     }
-                    /*
-                    if (docPosition == currentPos + runLen)
-                    {
-                        if (runIndex + 1 < paragraph.Runs.Count)
-                        {
-                            pos = new RunPosition
-                            {
-                                Paragraph = paragraph,
-                                Run = paragraph.Runs[runIndex + 1],
-                                RunIndex = runIndex + 1,
-                                OffsetInRun = 0
-                            };
-                            return true;
-                        }
-
-                        pos = new RunPosition
-                        {
-                            Paragraph = paragraph,
-                            Run = run,
-                            RunIndex = runIndex,
-                            OffsetInRun = runLen
-                        };
-                        return true;
-                    }
-                    */
                     currentPos += runLen;
                 }
 
@@ -279,7 +263,10 @@ namespace AbiCsEngine
 
             foreach (var run in _cursorLine.LayoutRuns)
             {
-                if (remaining <= run.Text.Length)
+                int runLen =
+    GetRunLogicalLength(run);
+
+                if (remaining <= runLen)
                 {
                     layoutRun = run;
 
@@ -451,6 +438,13 @@ namespace AbiCsEngine
                 _cursorCharOffset = 0;
             }
 
+            foreach (var line in _allLines)
+            {
+                Debug.WriteLine(
+                    $"LINE Start={line.StartDocPosition} End={line.EndDocPosition}");
+            }
+
+
             this.Invalidate();
         }
 
@@ -471,9 +465,11 @@ namespace AbiCsEngine
                             int localOffset =
                                 _caretRunOffset -
                                 run.SourceStartOffset;
+                            int runLen =
+    GetRunLogicalLength(run);
 
                             if (localOffset >= 0 &&
-                                localOffset <= run.Text.Length)
+                                localOffset <= runLen)
                             {
                                 _cursorLine = line;
                                 _cursorCharOffset =
@@ -657,12 +653,10 @@ namespace AbiCsEngine
                     break;
                 case Keys.Enter:
                     InsertParagraphBreak();
+                    Debug.WriteLine(
+    $"After Enter DocPos={_docPosition}");
                     e.Handled = true;
-                    break;
-                case Keys.F5:
-                    MoveDocPositionRight();
-                    e.Handled = true;
-                    break;
+                    break;                
                 case Keys.Back:
                     DeleteBackward();
                     e.Handled = true;
@@ -706,8 +700,10 @@ namespace AbiCsEngine
         private int GetLineCharCount(LayoutLine line)
         {
             int count = 0;
+
             foreach (var run in line.LayoutRuns)
-                count += run.Text.Length;
+                count += GetRunLogicalLength(run);
+
             return count;
         }
 
@@ -809,7 +805,8 @@ namespace AbiCsEngine
 
             foreach (var run in line.LayoutRuns)
             {
-                int runLen = run.Text.Length;
+                int runLen =
+    GetRunLogicalLength(run);
                 if (remaining < runLen)
                 {
                     if (remaining > 0)
@@ -886,7 +883,8 @@ namespace AbiCsEngine
             foreach (var run in line.LayoutRuns)
             {
                 float runEndX = runStartX + run.Bounds.Width;
-                int runLen = run.Text.Length;
+                int runLen =
+    GetRunLogicalLength(run);
 
                 if (x <= runStartX)
                     return globalOffset;
@@ -930,6 +928,12 @@ namespace AbiCsEngine
         private int GetCharOffsetInRun(Graphics g, LayoutRun run, float localX, StringFormat sf, RectangleF rect)
         {
             string text = run.Text;
+
+            if (run.StyleSource is EopRun)
+            {
+                return localX <= 0 ? 0 : 1;
+            }
+
             if (string.IsNullOrEmpty(text) || localX <= 0) return 0;
 
             using (Font font = new Font(run.StyleSource.FontName, run.StyleSource.FontSize, run.StyleSource.FontStyle))
@@ -997,68 +1001,68 @@ namespace AbiCsEngine
                 for (int i = 0; i < page.Lines.Count; i++)
                 {
                     var line = page.Lines[i];
-                    bool isEmpty =
-                        line.LayoutRuns == null ||
-                        line.LayoutRuns.Count == 0;
-
+                    
                     float x = renderOffsetX + page.PrintableArea.Left;
                     float y = GetLineTop(page.Lines, i); // ⭐ 핵심
                     float lineHeight = Math.Max(line.Bounds.Height, 18f);
 
-                    // =========================
-                    // 1. 빈 줄 처리
-                    // =========================
-                    if (isEmpty)
-                    {
 
-                        // ✔ 빈 문단 부호 (안전하게 표시)
-                        using (Font pilcrowFont = new Font("맑은 고딕", 11, FontStyle.Regular))
-                        {
-                            g.DrawString(
-                                "\u00B6", // ¶
-                                pilcrowFont,
-                                Brushes.LightGray,
-                                x,
-                                y);
-                        }
-
-                        continue;
-                    }
-
-                    // =========================
-                    // 2. 일반 텍스트 라인
-                    // =========================
                     foreach (var run in line.LayoutRuns)
                     {
+                        if (run.StyleSource is EopRun)
+                            continue;
+
                         using (Font font = new Font(
                             run.StyleSource.FontName,
                             run.StyleSource.FontSize,
                             run.StyleSource.FontStyle))
-                        using (Brush brush = new SolidBrush(run.StyleSource.ForeColor))
-                        using (StringFormat sf = new StringFormat(StringFormat.GenericTypographic))
+                        using (Brush brush =
+                            new SolidBrush(run.StyleSource.ForeColor))
+                        using (StringFormat sf =
+                            new StringFormat(
+                                StringFormat.GenericTypographic))
                         {
-                            sf.FormatFlags |= StringFormatFlags.MeasureTrailingSpaces;
+                            sf.FormatFlags |=
+                                StringFormatFlags.MeasureTrailingSpaces;
 
-                            float targetX = run.Bounds.X + renderOffsetX;
+                            float targetX =
+                                run.Bounds.X + renderOffsetX;
 
-                            g.DrawString(run.Text, font, brush, targetX, run.Bounds.Y, sf);
+                            g.DrawString(
+                                run.Text,
+                                font,
+                                brush,
+                                targetX,
+                                run.Bounds.Y,
+                                sf);
                         }
                     }
 
+
                     // =========================
-                    // 3. 문단 부호 (EOP 표시)
+                    // 문단 부호 (EOP 표시)
                     // =========================
+
                     bool showPilcrow =
-                        (line.EndDocPosition - line.StartDocPosition) > GetLineCharCount(line);
+    line.LayoutRuns.Exists(r => r.StyleSource is EopRun);
 
                     if (showPilcrow)
                     {
-                        var lastRun = line.LayoutRuns[^1];
+                        LayoutRun fontRun = line.LayoutRuns[^1];
+
+                        for (int ri = line.LayoutRuns.Count - 1; ri >= 0; ri--)
+                        {
+                            if (line.LayoutRuns[ri].StyleSource is not EopRun)
+                            {
+                                fontRun = line.LayoutRuns[ri];
+                                break;
+                            }
+                        }
 
                         using (Font pilcrowFont = new Font(
-                            lastRun.StyleSource.FontName,
-                            lastRun.StyleSource.FontSize,
-                            lastRun.StyleSource.FontStyle))
+                            fontRun.StyleSource.FontName,
+                            fontRun.StyleSource.FontSize,
+                            fontRun.StyleSource.FontStyle))
                         {
                             float pilcrowX =
                                 GetCursorXInPage(line, GetLineCharCount(line)) + renderOffsetX;
@@ -1257,6 +1261,7 @@ namespace AbiCsEngine
             Paragraph newPara = new Paragraph();
             int paraIndex;
 
+
             if (pos.Run is EopRun)
             {
                 newPara = new Paragraph();
@@ -1271,14 +1276,12 @@ namespace AbiCsEngine
                     newPara);
 
                 _docPosition =
-                    GetParagraphStartDocPos(
-                        newPara);
+                    GetParagraphStartDocPos(newPara) + 1;
 
                 RefreshLayout();
                 SyncCursorFromDocPosition();
                 return;
             }
-
 
 
             if (current.Runs.Count > 0 &&
@@ -1366,7 +1369,7 @@ namespace AbiCsEngine
                 newPara);
 
             _docPosition =
-    GetParagraphStartDocPos(newPara);
+    GetParagraphStartDocPos(newPara) + 1;
 
             RefreshLayout();
 
