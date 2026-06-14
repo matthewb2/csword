@@ -14,7 +14,6 @@ namespace AbiCsEngine
         private List<LayoutPage> _pages = new List<LayoutPage>();
         private GdiLayout _engine = new GdiLayout();
 
-        private LayoutLine? _cursorLine;
         private bool _cursorVisible;
         private System.Windows.Forms.Timer _cursorBlinkTimer;
 
@@ -110,11 +109,7 @@ namespace AbiCsEngine
         private void SyncCursorFromDocPosition()
         {
             UpdateCaretLineFromDocPosition();
-            if (_caretLineIndex >= 0 && _caretLineIndex < _allLines.Count)
-            {
-                _cursorLine = _allLines[_caretLineIndex];
-                
-            }
+            
         }
 
 
@@ -181,9 +176,6 @@ namespace AbiCsEngine
         protected override void OnKeyPress(KeyPressEventArgs e)
         {
             base.OnKeyPress(e);
-
-            if (_cursorLine == null)
-                return;
 
             if (char.IsControl(e.KeyChar))
                 return;
@@ -421,7 +413,7 @@ namespace AbiCsEngine
             else if (_allLines.Count > 0)
             {
                 _caretLineIndex = 0;
-                _cursorLine = _allLines[0];
+                
                 
             }
 
@@ -458,8 +450,7 @@ namespace AbiCsEngine
                             if (localOffset >= 0 &&
                                 localOffset <= runLen)
                             {
-                                _cursorLine = line;
-                                
+                                                                
 
                                 return;
                             }
@@ -584,15 +575,20 @@ namespace AbiCsEngine
         {
             base.OnKeyDown(e);
 
-            if (_cursorLine == null && _allLines.Count > 0)
+            // 초기 커서 위치 보정
+            if (_allLines.Count > 0 && _caretLineIndex < 0)
             {
                 _caretLineIndex = 0;
-                _cursorLine = _allLines[0];
                 e.Handled = true;
-                this.Invalidate();
+                Invalidate();
                 return;
             }
-            if (_cursorLine == null) return;
+
+            if (_allLines.Count == 0)
+                return;
+
+            if (_caretLineIndex < 0 || _caretLineIndex >= _allLines.Count)
+                return;
 
             switch (e.KeyCode)
             {
@@ -600,47 +596,52 @@ namespace AbiCsEngine
                     MoveVerticalByDocPosition(-1);
                     e.Handled = true;
                     break;
+
                 case Keys.Down:
                     MoveVerticalByDocPosition(1);
                     e.Handled = true;
                     break;
+
                 case Keys.Home:
-                    if (_allLines[_caretLineIndex] != null)
                     {
-                        _docPosition = _allLines[_caretLineIndex].StartDocPosition;
-                        
+                        LayoutLine line = _allLines[_caretLineIndex];
+                        _docPosition = line.StartDocPosition;
+                        e.Handled = true;
+                        break;
                     }
-                    e.Handled = true;
-                    break;
+
                 case Keys.End:
-                    if (_allLines[_caretLineIndex] != null)
                     {
-                        int lineLen = GetLineCharCount(_allLines[_caretLineIndex]);
-                        _docPosition = _allLines[_caretLineIndex].StartDocPosition + lineLen;
-                        
+                        LayoutLine line = _allLines[_caretLineIndex];
+                        int lineLen = GetLineCharCount(line);
+                        _docPosition = line.StartDocPosition + lineLen;
+                        e.Handled = true;
+                        break;
                     }
-                    e.Handled = true;
-                    break;
+
                 case Keys.Enter:
                     InsertParagraphBreak();
                     Debug.WriteLine(
-    $"After Enter DocPos={_docPosition}");
+                        $"After Enter DocPos={_docPosition}");
                     e.Handled = true;
-                    break;                
+                    break;
+
                 case Keys.Back:
                     DeleteBackward();
                     e.Handled = true;
                     break;
+
                 case Keys.Delete:
                     DeleteForward();
                     e.Handled = true;
                     break;
+
                 default:
                     return;
             }
 
             _cursorVisible = true;
-            this.Invalidate();
+            Invalidate();
         }
 
         private void MoveDocPositionRight()
@@ -751,8 +752,7 @@ namespace AbiCsEngine
             int targetIndex = _allLines.IndexOf(targetLine);
             if (targetIndex >= 0)
                 _caretLineIndex = targetIndex;
-            _cursorLine = targetLine;
-            
+                        
             _cursorVisible = true;
 
             Invalidate();
