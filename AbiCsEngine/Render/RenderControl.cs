@@ -79,40 +79,6 @@ namespace AbiCsEngine
             return targetLine.StartDocPosition + targetOffset;
         }
 
-        private void DumpRunInfo(
-    LayoutLine line,
-    int charOffset)
-        {
-            int remaining = charOffset;
-
-            Debug.WriteLine(
-                $"LINE OFFSET={charOffset}");
-
-            foreach (var run in line.LayoutRuns)
-            {
-                Debug.WriteLine(
-                    $"RUN '{run.Text}' LEN={run.Text.Length}");
-
-                if (remaining <= run.Text.Length)
-                {
-                    Debug.WriteLine(
-                        $"--> CARET IN RUN '{run.Text}' LOCAL={remaining}");
-
-                    return;
-                }
-
-                remaining -= run.Text.Length;
-            }
-        }
-
-
-        private void SyncCursorFromDocPosition()
-        {
-            UpdateCaretLineFromDocPosition();
-            
-        }
-
-
         public Document? Document
         {
             get => _document;
@@ -274,7 +240,7 @@ namespace AbiCsEngine
                     emptyPara.Runs.Add(new TextRun { Text = ch.ToString() });
                     _docPosition++;
                     RefreshLayout();
-                    SyncCursorFromDocPosition();
+                    UpdateCaretLineFromDocPosition();
                 }
                 return;
             }
@@ -291,11 +257,14 @@ namespace AbiCsEngine
 
             RefreshLayout();
 
-            SyncCursorFromDocPosition();
+            UpdateCaretLineFromDocPosition();
         }
 
         private void DeleteBackward()
         {
+            if (_document == null)
+                return;
+
             if (_docPosition == 0)
                 return;
 
@@ -306,38 +275,73 @@ namespace AbiCsEngine
                 out var pos))
                 return;
 
-            int paraStart = GetParagraphStartDocPos(pos.Paragraph);
-
-            if (deletePos == paraStart + pos.Paragraph.Length - 1)
+            // =========================
+            // EOP 삭제 → 문단 병합
+            // =========================
+            if (pos.Run is EopRun)
             {
-                int paraIndex = _document.Paragraphs.IndexOf(pos.Paragraph);
-                if (paraIndex >= 0 && paraIndex + 1 < _document.Paragraphs.Count)
+                int paraIndex =
+                    _document.Paragraphs.IndexOf(
+                        pos.Paragraph);
+
+                if (paraIndex < 0)
+                    return;
+
+                if (paraIndex + 1 >=
+                    _document.Paragraphs.Count)
+                    return;
+
+                Paragraph nextPara =
+                    _document.Paragraphs[
+                        paraIndex + 1];
+
+                // 현재 문단의 EOP 제거
+                pos.Paragraph.Runs.RemoveAt(
+                    pos.RunIndex);
+
+                // 다음 문단 내용 이동
+                foreach (var run in nextPara.Runs)
                 {
-                    var nextPara = _document.Paragraphs[paraIndex + 1];
-                    foreach (var r in nextPara.Runs)
-                        pos.Paragraph.Runs.Add(r);
-                    _document.Paragraphs.RemoveAt(paraIndex + 1);
-                    _docPosition = deletePos;
-                    NormalizeParagraph(pos.Paragraph);
-                    RefreshLayout();
-                    SyncCursorFromDocPosition();
+                    pos.Paragraph.Runs.Add(run);
                 }
+
+                _document.Paragraphs.RemoveAt(
+                    paraIndex + 1);
+
+                NormalizeParagraph(
+                    pos.Paragraph);
+
+                _docPosition--;
+
+                RefreshLayout();
+                UpdateCaretLineFromDocPosition();
+
                 return;
             }
 
-            pos.Run.Text =
-                pos.Run.Text.Remove(
-                    pos.OffsetInRun,
-                    1);
+            // =========================
+            // 일반 문자 삭제
+            // =========================
 
-            _docPosition--;
+            if (pos.Run is TextRun textRun)
+            {
+                textRun.Text =
+                    textRun.Text.Remove(
+                        pos.OffsetInRun,
+                        1);
 
-            NormalizeParagraph(
-    pos.Paragraph);
+                RemoveEmptyRun(
+                    textRun,
+                    pos.Paragraph);
 
-            RefreshLayout();
+                NormalizeParagraph(
+                    pos.Paragraph);
 
-            SyncCursorFromDocPosition();
+                _docPosition--;
+
+                RefreshLayout();
+                UpdateCaretLineFromDocPosition();
+            }
         }
 
         private void RemoveEmptyRun(
@@ -349,7 +353,7 @@ namespace AbiCsEngine
                 paragraph.Runs.Remove(run);
             }
         }
-
+        /*
         private void DumpDocument()
         {
             if (_document == null)
@@ -383,13 +387,12 @@ namespace AbiCsEngine
 
             Debug.WriteLine("==============================");
         }
-
+        */
 
         public void RefreshLayout()
         {
             if (_document == null) return;
 
-            DumpDocument();
 
             using (Graphics g = this.CreateGraphics())
             {
@@ -406,11 +409,7 @@ namespace AbiCsEngine
 
             RebuildAllLines();
 
-            if (_caretRun != null)
-            {
-                RestoreCaret();
-            }
-            else if (_allLines.Count > 0)
+            if (_allLines.Count > 0)
             {
                 _caretLineIndex = 0;
                 
@@ -425,41 +424,6 @@ namespace AbiCsEngine
 
 
             this.Invalidate();
-        }
-
-        private void RestoreCaret()
-        {
-            if (_caretRun == null) return;
-
-            foreach (var page in _pages)
-            {
-                foreach (var line in page.Lines)
-                {
-                    int globalOffset = 0;
-
-                    foreach (var run in line.LayoutRuns)
-                    {
-                        if (run.StyleSource == _caretRun)
-                        {
-                            int localOffset =
-                                _caretRunOffset -
-                                run.SourceStartOffset;
-                            int runLen =
-    GetRunLogicalLength(run);
-
-                            if (localOffset >= 0 &&
-                                localOffset <= runLen)
-                            {
-                                                                
-
-                                return;
-                            }
-                        }
-
-                        globalOffset += run.Text.Length;
-                    }
-                }
-            }
         }
 
         private void DeleteForward()
@@ -482,7 +446,7 @@ namespace AbiCsEngine
                     _document.Paragraphs.RemoveAt(paraIndex + 1);
                     NormalizeParagraph(pos.Paragraph);
                     RefreshLayout();
-                    SyncCursorFromDocPosition();
+                    UpdateCaretLineFromDocPosition();
                 }
                 return;
             }
@@ -503,7 +467,7 @@ namespace AbiCsEngine
 
             RefreshLayout();
 
-            SyncCursorFromDocPosition();
+            UpdateCaretLineFromDocPosition();
         }
 
         private void DeleteAcrossRunBoundary(
@@ -648,7 +612,7 @@ namespace AbiCsEngine
         {
             _docPosition++;
 
-            SyncCursorFromDocPosition();
+            UpdateCaretLineFromDocPosition();
 
             
         }
@@ -657,7 +621,7 @@ namespace AbiCsEngine
         {
             _docPosition--;
 
-            SyncCursorFromDocPosition();
+            UpdateCaretLineFromDocPosition();
 
         }
 
@@ -1230,7 +1194,7 @@ namespace AbiCsEngine
                 _docPosition++;
 
                 RefreshLayout();
-                SyncCursorFromDocPosition();
+                UpdateCaretLineFromDocPosition();
                 return;
             }
 
@@ -1307,7 +1271,7 @@ namespace AbiCsEngine
 
             RefreshLayout();
 
-            SyncCursorFromDocPosition();
+            UpdateCaretLineFromDocPosition();
 
             Invalidate();
         }
