@@ -189,37 +189,6 @@ namespace AbiCsEngine
                         return true;
                     }
 
-                    // 현재 Run 바로 뒤
-                    if (docPosition == currentPos + runLen)
-                    {
-                        if (runIndex + 1 < paragraph.Runs.Count)
-                        {
-                            pos = new RunPosition
-                            {
-                                Paragraph = paragraph,
-                                Run = paragraph.Runs[runIndex + 1],
-                                RunIndex = runIndex + 1,
-                                OffsetInRun = 0
-                            };
-
-                            return true;
-                        }
-
-                        // 문단 끝이면 EOP 뒤
-                        if (run is EopRun)
-                        {
-                            pos = new RunPosition
-                            {
-                                Paragraph = paragraph,
-                                Run = run,
-                                RunIndex = runIndex,
-                                OffsetInRun = 1
-                            };
-
-                            return true;
-                        }
-                    }
-
                     currentPos += runLen;
                 }
             }
@@ -408,90 +377,87 @@ namespace AbiCsEngine
             }
 
             RebuildAllLines();
-
-            if (_allLines.Count > 0)
-            {
-                _caretLineIndex = 0;
-                
-                
-            }
-
-            foreach (var line in _allLines)
-            {
-                Debug.WriteLine(
-                    $"LINE Start={line.StartDocPosition} End={line.EndDocPosition}");
-            }
-
-
             this.Invalidate();
         }
 
         private void DeleteForward()
         {
+            if (_document == null)
+                return;
+
             if (!TryFindRunPosition(
                 _docPosition,
                 out var pos))
                 return;
 
-            int paraStart = GetParagraphStartDocPos(pos.Paragraph);
-
-            if (_docPosition == paraStart + pos.Paragraph.Length - 1)
+            // =========================
+            // EOP 삭제 → 문단 병합
+            // =========================
+            if (pos.Run is EopRun)
             {
-                int paraIndex = _document.Paragraphs.IndexOf(pos.Paragraph);
-                if (paraIndex >= 0 && paraIndex + 1 < _document.Paragraphs.Count)
+                int paraIndex =
+                    _document.Paragraphs.IndexOf(
+                        pos.Paragraph);
+
+                if (paraIndex < 0)
+                    return;
+
+                if (paraIndex + 1 >=
+                    _document.Paragraphs.Count)
+                    return;
+
+                Paragraph nextPara =
+                    _document.Paragraphs[
+                        paraIndex + 1];
+
+                pos.Paragraph.Runs.RemoveAt(
+                    pos.RunIndex);
+
+                foreach (var run in nextPara.Runs)
                 {
-                    var nextPara = _document.Paragraphs[paraIndex + 1];
-                    foreach (var r in nextPara.Runs)
-                        pos.Paragraph.Runs.Add(r);
-                    _document.Paragraphs.RemoveAt(paraIndex + 1);
-                    NormalizeParagraph(pos.Paragraph);
-                    RefreshLayout();
-                    UpdateCaretLineFromDocPosition();
+                    pos.Paragraph.Runs.Add(run);
                 }
+
+                _document.Paragraphs.RemoveAt(
+                    paraIndex + 1);
+
+                NormalizeParagraph(
+                    pos.Paragraph);
+
+                RefreshLayout();
+                UpdateCaretLineFromDocPosition();
+
                 return;
             }
 
-            if (pos.OffsetInRun < pos.Run.Text.Length)
+            // =========================
+            // 일반 문자 삭제
+            // =========================
+
+            if (pos.Run is TextRun textRun)
             {
-                pos.Run.Text =
-                    pos.Run.Text.Remove(
+                if (pos.OffsetInRun >=
+                    textRun.Text.Length)
+                {
+                    return;
+                }
+
+                textRun.Text =
+                    textRun.Text.Remove(
                         pos.OffsetInRun,
                         1);
+
+                RemoveEmptyRun(
+                    textRun,
+                    pos.Paragraph);
+
                 NormalizeParagraph(
-    pos.Paragraph);
+                    pos.Paragraph);
+
+                RefreshLayout();
+                UpdateCaretLineFromDocPosition();
             }
-            else
-            {
-                DeleteAcrossRunBoundary(pos);
-            }
-
-            RefreshLayout();
-
-            UpdateCaretLineFromDocPosition();
         }
-
-        private void DeleteAcrossRunBoundary(
-    RunPosition pos)
-        {
-            if (pos.RunIndex + 1 >=
-                pos.Paragraph.Runs.Count)
-                return;
-
-            var nextRun =
-                pos.Paragraph.Runs[
-                    pos.RunIndex + 1];
-
-            if (nextRun.Text.Length == 0)
-                return;
-
-            nextRun.Text =
-                nextRun.Text.Remove(0, 1);
-
-            RemoveEmptyRun(
-                nextRun,
-                pos.Paragraph);
-        }
-
 
         protected override void OnGotFocus(EventArgs e)
         {
@@ -1136,17 +1102,6 @@ namespace AbiCsEngine
 
                 i++;
             }
-        }
-
-        private int GetParagraphStartDocPos(Paragraph target)
-        {
-            int pos = 0;
-            foreach (var para in _document.Paragraphs)
-            {
-                if (para == target) return pos;
-                pos += para.Length;
-            }
-            return -1;
         }
 
         private Paragraph? FindParagraphAtDocPos(int docPos)
