@@ -67,10 +67,11 @@ namespace AbiCsEngine
                             ref currentGlobalY,
                             pages,
                             lineStartDocPos,
-                            docPos);
+                            docPos - 1);
 
                         printArea = currentPage.PrintableArea;
                         lineStartDocPos = docPos;
+                        localX = printArea.Left;
 
                         continue;
                     }
@@ -139,8 +140,24 @@ namespace AbiCsEngine
                     }
                 }
 
-                if (!hasEopRun)
+                if (!hasEopRun && currentLineBuffer.Count > 0)
                 {
+                    currentLineHeight =
+                        Math.Max(currentLineHeight, 18f);
+
+                    currentLineBuffer.Add(
+                        new LayoutRun
+                        {
+                            Text = "",
+                            StyleSource = new EopRun(),
+                            Bounds = new RectangleF(
+                                localX,
+                                0,
+                                0,
+                                currentLineHeight),
+                            SourceStartOffset = 0
+                        });
+
                     docPos++;
 
                     FlushLine(
@@ -154,10 +171,11 @@ namespace AbiCsEngine
                         ref currentGlobalY,
                         pages,
                         lineStartDocPos,
-                        docPos);
+                        docPos - 1);
 
                     printArea = currentPage.PrintableArea;
                     lineStartDocPos = docPos;
+                    localX = printArea.Left;
                 }
 
             }

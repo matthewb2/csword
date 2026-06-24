@@ -20,7 +20,21 @@ namespace AbiCsEngine
             // 명확하게 우리가 만든 Core의 Document임을 컴파일러에게 지정
             AbiCsEngine.Document doc = new AbiCsEngine.Document();
 
+            
+            Paragraph pTitle = new Paragraph();
+            pTitle.Runs.Add(new TextRun { Text = "ABC", FontSize = 24, FontStyle = FontStyle.Bold, ForeColor = Color.AntiqueWhite });
+            pTitle.Runs.Add(
+    new EopRun());
+            pTitle.Runs.Add(
+    new EopRun());
+            pTitle.Runs.Add(new TextRun { Text = "DEF", FontSize = 24, FontStyle = FontStyle.Bold, ForeColor = Color.AntiqueWhite });
+            pTitle.Runs.Add(
+    new EopRun());
+
+            doc.Paragraphs.Add(pTitle);
+            
             // 타이틀 문단
+            /*
             Paragraph pTitle = new Paragraph();
             pTitle.Runs.Add(new TextRun { Text = "AbiWord C# 레이아웃 명세서 문서", FontSize = 24, FontStyle = FontStyle.Bold, ForeColor = Color.AntiqueWhite });
             pTitle.Runs.Add(
@@ -47,7 +61,7 @@ namespace AbiCsEngine
                 doc.Paragraphs.Add(p);
 
             }
-
+            */
             // 엔진 가동 및 화면 바인딩
             render.Document = doc;
         }
