@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Diagnostics.Metrics;
 using System.Drawing;
 using System.Runtime.ConstrainedExecution;
 using System.Windows.Forms;
@@ -23,8 +24,7 @@ namespace AbiCsEngine
 
         private readonly List<LayoutLine> _allLines = new();
         private int _caretLineIndex;
-        private int _docPosition = -1;
-        private int DocPosRaw => _docPosition + 1;
+        private int _docPosition;
 
         private void RebuildAllLines()
         {
@@ -88,7 +88,7 @@ namespace AbiCsEngine
             LayoutLine line = _allLines[_caretLineIndex];
 
             int offsetInLine =
-                DocPosRaw - line.StartDocPosition;
+                _docPosition - line.StartDocPosition;
 
             int lineLength =
     GetLineCharCount(line);
@@ -108,7 +108,7 @@ namespace AbiCsEngine
     LayoutLine targetLine,
     int targetOffset)
         {
-            return targetLine.StartDocPosition + targetOffset - 1;
+            return targetLine.StartDocPosition + targetOffset;
         }
 
         public Document? Document
@@ -159,7 +159,7 @@ namespace AbiCsEngine
                     MoveDocPositionLeft();
                     return true;
                 case Keys.Right:
-                    MoveDocPositionRight();
+                    MoveRight();
                     return true;
                 case Keys.Up:
                 case Keys.Down:
@@ -232,10 +232,10 @@ namespace AbiCsEngine
         private void InsertCharacter(char ch)
         {
             if (!TryFindRunPosition(
-                DocPosRaw,
+                _docPosition,
                 out var pos))
             {
-                var emptyPara = FindParagraphAtDocPos(DocPosRaw);
+                var emptyPara = FindParagraphAtDocPos(_docPosition);
                 if (emptyPara != null)
                 {
                     emptyPara.Runs.Add(new TextRun { Text = ch.ToString() });
@@ -266,10 +266,10 @@ namespace AbiCsEngine
             if (_document == null)
                 return;
 
-            if (_docPosition == -1)
+            if (_docPosition == 0)
                 return;
 
-            int deletePos = DocPosRaw - 1;
+            int deletePos = _docPosition - 1;
 
             if (!TryFindRunPosition(
                 deletePos,
@@ -384,11 +384,8 @@ namespace AbiCsEngine
             if (_document == null)
                 return;
 
-            if (_docPosition == -1)
-                return;
-
             if (!TryFindRunPosition(
-                DocPosRaw,
+                _docPosition,
                 out var pos))
                 return;
 
@@ -579,7 +576,7 @@ namespace AbiCsEngine
         private void MoveDocPositionRight()
         {
             _docPosition++;
-            Debug.WriteLine($"docPosition: {_docPosition}");
+            Debug.WriteLine($"docPosition: '{_docPosition}'");
 
             UpdateCaretLine();
 
@@ -1012,6 +1009,42 @@ namespace AbiCsEngine
             }
         }
 
+        private void MoveRight()
+        {
+            if (TryFindRunPosition(_docPosition, out RunPosition pos))
+            {
+                if (pos.Run is EopRun)
+                {
+                    _docPosition++;
+                    _caretLineIndex++;
+                }
+                else
+                {
+                    var line = _allLines[_caretLineIndex];
+
+                    // 줄 끝에 있는가?
+                    if (_docPosition == line.EndDocPosition &&
+                        _caretLineIndex < _allLines.Count - 1)
+                    {
+                        var nextLine = _allLines[_caretLineIndex + 1];
+
+                        // 다음 줄 시작도 같은 docPosition인가?
+                        if (nextLine.StartDocPosition == _docPosition)
+                        {
+                            _caretLineIndex++;
+                            return;
+                        }
+                    }
+                    _docPosition++;
+                }
+            }
+
+            
+            
+
+        }
+
+
         private void UpdateCaretLine()
         {
             if (_allLines.Count == 0)
@@ -1020,54 +1053,48 @@ namespace AbiCsEngine
                 return;
             }
 
-            if (_docPosition == -1)
-            {
-                _caretLineIndex = 0;
-                return;
-            }
 
+            var current = _allLines[_caretLineIndex];
 
-            var cur = _allLines[_caretLineIndex];
-                        
+            Debug.WriteLine(
+$"start={current.StartDocPosition} " +
+$"end={current.EndDocPosition} " +
+$"OffsetInRun=");
 
-
-            // 현재 라인 유지 시도
-            if (_caretLineIndex >= 0 &&
-                _caretLineIndex < _allLines.Count)
-            {
-                var current = _allLines[_caretLineIndex];
-
-                Debug.WriteLine(
-   $"start='{current.StartDocPosition}' " +
-   $"end={current.EndDocPosition} " +
-   $"OffsetInRun=");
-
-
-                if (_docPosition >= current.StartDocPosition &&
-                    _docPosition < current.EndDocPosition)
-                {
-                    return;
-                }
-            }
 
             // 전체 탐색
             for (int i = 0; i < _allLines.Count; i++)
             {
                 var line = _allLines[i];
+                
+
 
                 if (_docPosition >= line.StartDocPosition &&
                     _docPosition < line.EndDocPosition)
                 {
                     _caretLineIndex = i;
-                    return;
+                    Debug.WriteLine("here");
+                    Debug.WriteLine($"_caretLineIndex: {_caretLineIndex}");
+                    break;
                 }
+                /*
+
+                if (_docPosition > line.EndDocPosition)
+                {
+                    RunPosition? pos = null;
+                    TryFindRunPosition(_docPosition, out pos);
+
+                    if (pos?.Run is EopRun)
+                    {
+                        _caretLineIndex++;
+                        
+                    } else _caretLineIndex = i;
+                                        
+                }
+                */
             }
 
-            if (_allLines.Count > 0 &&
-    _docPosition == _allLines[^1].EndDocPosition)
-            {
-                _caretLineIndex = _allLines.Count - 1;
-            }
+
         }
 
 
@@ -1139,7 +1166,7 @@ namespace AbiCsEngine
         private void InsertParagraphBreak()
         {
             if (!TryFindRunPosition(
-                DocPosRaw,
+                _docPosition,
                 out var pos))
             {
                 return;
