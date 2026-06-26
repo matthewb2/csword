@@ -573,16 +573,6 @@ namespace AbiCsEngine
             Invalidate();
         }
 
-        private void MoveDocPositionRight()
-        {
-            _docPosition++;
-            Debug.WriteLine($"docPosition: '{_docPosition}'");
-
-            UpdateCaretLine();
-
-            
-        }
-
         private void MoveDocPositionLeft()
         {
             _docPosition--;
