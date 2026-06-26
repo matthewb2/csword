@@ -8,6 +8,13 @@ using System.Windows.Forms;
 
 namespace AbiCsEngine
 {
+
+    public enum CaretAffinity
+    {
+        Before,
+        After
+    }
+
     public class RenderControl : UserControl
     {
 
@@ -24,6 +31,10 @@ namespace AbiCsEngine
 
         private readonly List<LayoutLine> _allLines = new();
         private int _caretLineIndex;
+
+        private CaretAffinity _caretAffinity =
+    CaretAffinity.Before;
+
         private int _docPosition;
 
         private void RebuildAllLines()
@@ -38,6 +49,54 @@ namespace AbiCsEngine
             DumpAllLines();
 
         }
+
+        private LayoutLine FindCaretLine(int docPosition)
+        {
+            for (int i = 0; i < _allLines.Count; i++)
+            {
+                LayoutLine line = _allLines[i];
+
+                // 줄 내부
+                if (_docPosition > line.StartDocPosition &&
+                    _docPosition < line.EndDocPosition)
+                {
+                    return line;
+                }
+
+                // 줄 끝
+                if (_docPosition == line.EndDocPosition)
+                {
+                    bool wrapped =
+                        i + 1 < _allLines.Count &&
+                        _allLines[i + 1].StartDocPosition == _docPosition;
+
+                    if (!wrapped)
+                        return line;
+
+                    return _caretAffinity == CaretAffinity.Before
+                        ? line
+                        : _allLines[i + 1];
+                }
+
+                // 줄 시작
+                if (_docPosition == line.StartDocPosition)
+                {
+                    bool wrapped =
+                        i > 0 &&
+                        _allLines[i - 1].EndDocPosition == _docPosition;
+
+                    if (!wrapped)
+                        return line;
+
+                    return _caretAffinity == CaretAffinity.After
+                        ? line
+                        : _allLines[i - 1];
+                }
+            }
+
+            return _allLines[^1];
+        }
+
 
         private void DumpAllLines()
         {
@@ -241,7 +300,7 @@ namespace AbiCsEngine
                     emptyPara.Runs.Add(new TextRun { Text = ch.ToString() });
                     _docPosition++;
                     RefreshLayout();
-                    UpdateCaretLine();
+                    UpdateCaretLine(_docPosition);
                 }
                 return;
             }
@@ -258,7 +317,7 @@ namespace AbiCsEngine
 
             RefreshLayout();
 
-            UpdateCaretLine();
+            UpdateCaretLine(_docPosition);
         }
 
         private void DeleteBackward()
@@ -315,7 +374,7 @@ namespace AbiCsEngine
                 _docPosition--;
 
                 RefreshLayout();
-                UpdateCaretLine();
+                UpdateCaretLine(_docPosition);
 
                 return;
             }
@@ -341,7 +400,7 @@ namespace AbiCsEngine
                 _docPosition--;
 
                 RefreshLayout();
-                UpdateCaretLine();
+                UpdateCaretLine(_docPosition);
             }
         }
 
@@ -424,7 +483,7 @@ namespace AbiCsEngine
                     pos.Paragraph);
 
                 RefreshLayout();
-                UpdateCaretLine();
+                UpdateCaretLine(_docPosition);
 
                 return;
             }
@@ -454,7 +513,7 @@ namespace AbiCsEngine
                     pos.Paragraph);
 
                 RefreshLayout();
-                UpdateCaretLine();
+                UpdateCaretLine(_docPosition);
             }
         }
 
@@ -491,7 +550,9 @@ namespace AbiCsEngine
          result.line!,
          result.charOffset);
 
-                UpdateCaretLine();
+                int idx = _allLines.IndexOf(result.line);
+                if (idx >= 0)
+                    _caretLineIndex = idx;
 
                 Debug.WriteLine(
                     $"MOUSE DocPos={_docPosition}");
@@ -577,7 +638,7 @@ namespace AbiCsEngine
         {
             _docPosition--;
 
-            UpdateCaretLine();
+            UpdateCaretLine(_docPosition);
 
         }
 
@@ -726,12 +787,18 @@ namespace AbiCsEngine
                 float pageLeft = GetPageLeft();
                 float pageRight = pageLeft + page.PageBounds.Width;
 
-                if (canvasPt.X >= pageLeft && canvasPt.X <= pageRight &&
-                    canvasPt.Y >= page.PageBounds.Y - 10 &&
-                    canvasPt.Y <= page.PageBounds.Y + page.PageBounds.Height + 10)
-                {
-                    float clickX = canvasPt.X - pageLeft;
+                if (canvasPt.Y < page.PageBounds.Y - 10 ||
+                    canvasPt.Y > page.PageBounds.Y + page.PageBounds.Height + 10)
+                    continue;
 
+                bool inPageX = canvasPt.X >= pageLeft && canvasPt.X <= pageRight;
+                bool rightMargin = canvasPt.X > pageRight;
+
+                float clickX = canvasPt.X - pageLeft;
+
+                // 페이지 내부 클릭
+                if (inPageX)
+                {
                     foreach (var line in page.Lines)
                     {
                         float lineTop = line.Bounds.Y;
@@ -743,22 +810,55 @@ namespace AbiCsEngine
                             return (line, charOffset);
                         }
                     }
+                }
 
-                    if (page.Lines.Count > 0)
+                // 페이지 오른쪽 여백 클릭
+                if (rightMargin && page.Lines.Count > 0)
+                {
+                    LayoutLine closest = page.Lines[0];
+                    float minDist = float.MaxValue;
+
+                    foreach (var line in page.Lines)
                     {
-                        LayoutLine closest = page.Lines[0];
-                        float minDist = float.MaxValue;
-                        foreach (var line in page.Lines)
+                        float centerY = line.Bounds.Y + line.Bounds.Height / 2;
+                        float dist = Math.Abs(canvasPt.Y - centerY);
+
+                        if (dist < minDist)
                         {
-                            float dist = Math.Abs(canvasPt.Y - (line.Bounds.Y + line.Bounds.Height / 2));
-                            if (dist < minDist) { minDist = dist; closest = line; }
+                            minDist = dist;
+                            closest = line;
                         }
-                        int co = GetCharOffsetFromX(closest, clickX);
-                        return (closest, co);
                     }
+
+                    // 항상 줄 끝으로 이동
+                    int charOffset = closest.EndDocPosition - closest.StartDocPosition;
+                    return (closest, charOffset);
+                }
+
+                // 페이지 내부지만 줄 사이를 클릭한 경우
+                if (page.Lines.Count > 0)
+                {
+                    LayoutLine closest = page.Lines[0];
+                    float minDist = float.MaxValue;
+
+                    foreach (var line in page.Lines)
+                    {
+                        float centerY = line.Bounds.Y + line.Bounds.Height / 2;
+                        float dist = Math.Abs(canvasPt.Y - centerY);
+
+                        if (dist < minDist)
+                        {
+                            minDist = dist;
+                            closest = line;
+                        }
+                    }
+
+                    int co = GetCharOffsetFromX(closest, clickX);
+                    return (closest, co);
                 }
             }
-            return ((LayoutLine?)null, 0);
+
+            return (null, 0);
         }
 
         private int GetCharOffsetFromX(LayoutLine line, float x)
@@ -1010,7 +1110,8 @@ namespace AbiCsEngine
                 }
                 else
                 {
-                    var line = _allLines[_caretLineIndex];
+                    //var line = _allLines[_caretLineIndex];
+                    var line = FindCaretLine(_docPosition);
 
                     // 줄 끝에 있는가?
                     if (_docPosition == line.EndDocPosition &&
@@ -1027,15 +1128,13 @@ namespace AbiCsEngine
                     }
                     _docPosition++;
                 }
-            }
-
-            
+            }                  
             
 
         }
 
 
-        private void UpdateCaretLine()
+        private void UpdateCaretLine(int docPositon)
         {
             if (_allLines.Count == 0)
             {
@@ -1051,7 +1150,7 @@ $"start={current.StartDocPosition} " +
 $"end={current.EndDocPosition} " +
 $"OffsetInRun=");
 
-
+            
             // 전체 탐색
             for (int i = 0; i < _allLines.Count; i++)
             {
@@ -1067,23 +1166,9 @@ $"OffsetInRun=");
                     Debug.WriteLine($"_caretLineIndex: {_caretLineIndex}");
                     break;
                 }
-                /*
-
-                if (_docPosition > line.EndDocPosition)
-                {
-                    RunPosition? pos = null;
-                    TryFindRunPosition(_docPosition, out pos);
-
-                    if (pos?.Run is EopRun)
-                    {
-                        _caretLineIndex++;
-                        
-                    } else _caretLineIndex = i;
-                                        
-                }
-                */
+                
             }
-
+            
 
         }
 
@@ -1186,7 +1271,7 @@ $"OffsetInRun=");
                 _docPosition++;
 
                 RefreshLayout();
-                UpdateCaretLine();
+                UpdateCaretLine(_docPosition);
                 return;
             }
 
@@ -1263,7 +1348,7 @@ $"OffsetInRun=");
 
             RefreshLayout();
 
-            UpdateCaretLine();
+            UpdateCaretLine(_docPosition);
 
             Invalidate();
         }
